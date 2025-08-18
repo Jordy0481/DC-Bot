@@ -422,7 +422,7 @@ LOG_CHANNELS = {
     "warn": 1406995238404231299,
     "timeout": 1405586885384081448
 }
- ------------------- Moderatie UI (fixed & robust) -------------------
+ #------------------- Moderatie UI (fixed & robust) -------------------
 class ModeratieModal(Modal, title="Reden en opties"):
     reden = TextInput(label="Reden", style=discord.TextStyle.paragraph, placeholder="Geef een reden", required=True)
     duur = TextInput(label="Timeout in seconden (alleen bij timeout)", style=discord.TextStyle.short,
