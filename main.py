@@ -431,15 +431,21 @@ class ModeratieView(discord.ui.View):
         self.reden = None
         self.duur_sec = None
 
-    # Gebruiker kiezen
-    @discord.ui.UserSelect(placeholder="Kies een gebruiker", min_values=1, max_values=1)
-    async def select_user(self, select: discord.ui.UserSelect, interaction: discord.Interaction):
+        # Voeg UserSelect toe
+        self.user_select = discord.ui.UserSelect(
+            placeholder="Kies een gebruiker",
+            min_values=1,
+            max_values=1
+        )
+        self.user_select.callback = self.select_user
+        self.add_item(self.user_select)
+
+    async def select_user(self, interaction: discord.Interaction):
         if not any(r.id in MOD_ROLES for r in interaction.user.roles):
             await interaction.response.send_message("❌ Je hebt geen toegang.", ephemeral=True)
             return
-        self.target_member = select.values[0]
+        self.target_member = interaction.user  # of interaction.data['values'][0] afhankelijk van versie
         await interaction.response.send_message(f"✅ Gebruiker gekozen: {self.target_member.mention}", ephemeral=True)
-
     # Actie buttons
     @discord.ui.Button(label="Ban", style=discord.ButtonStyle.danger)
     async def ban_button(self, button: discord.ui.Button, interaction: discord.Interaction):
