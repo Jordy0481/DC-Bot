@@ -38,23 +38,6 @@ ALLOWED_ROLES = {
     1402419665808134395
 }
 
-UNBAN_ROLES = {
-    1402418357596061756,
-    1402418713612910663,
-    1403013958562218054,
-    1342974632524775527,
-    1342974632524775528,
-    1405597740494356631,
-    1402419665808134395
-}
-
-# Log channels
-LOG_CHANNELS = {
-    "ban": 1405586824847556769,
-    "kick": 1405586854442569749,
-    "warn": 1406995238404231299,
-    "unban": 1405587917287587860
-}
 
 # ------------------- Bot -------------------
 intents = discord.Intents.default()
@@ -307,8 +290,8 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
                 print(f"Kon rol niet verwijderen: {e}")
 
 
-# ------------------- Moderatie UI -------------------
-class ModeratieModal(Modal, title="Reden en opties"):
+# Moderatie UI (Ban/Kick/Warn/Unban)
+class ModeratieModal(Modal, title="Reden"):
     reden = TextInput(label="Reden", style=discord.TextStyle.paragraph, placeholder="Geef een reden", required=True)
 
     def __init__(self, view_ref):
@@ -318,7 +301,7 @@ class ModeratieModal(Modal, title="Reden en opties"):
     async def on_submit(self, interaction: discord.Interaction):
         view = self.view_ref
         view.reden = self.reden.value
-        member: discord.Member = view.target_member
+        member = view.target_member
         actie = view.actie
         reden = view.reden
 
@@ -328,24 +311,39 @@ class ModeratieModal(Modal, title="Reden en opties"):
             elif actie == "kick":
                 await member.kick(reason=reden)
             elif actie == "warn":
-                # add persistent warn logic if needed
-                pass
+                pass  # hier kan je je warn-logica toevoegen
+            elif actie == "unban":
+                user_id = view.user_id_to_unban
+                bans = await interaction.guild.bans()
+                ban_entry = next((b for b in bans if b.user.id == user_id), None)
+                if not ban_entry:
+                    await interaction.response.send_message("❌ Deze gebruiker is niet geband.", ephemeral=True)
+                    return
+                await interaction.guild.unban(ban_entry.user, reason=reden)
 
             # Logging
-            log_channel_id = LOG_CHANNELS.get(actie)
+            log_channel_id = {
+                "ban": 1405586824847556769,
+                "kick": 1405586854442569749,
+                "warn": 1406995238404231299,
+                "unban": 1405587917287587860
+            }.get(actie)
+
             if log_channel_id:
                 log_channel = interaction.guild.get_channel(log_channel_id)
                 if log_channel:
                     embed = discord.Embed(
                         title=f"{actie.capitalize()} uitgevoerd",
-                        description=f"**Gebruiker:** {member.mention}\n**Reden:** {reden}\n**Door:** {interaction.user.mention}",
+                        description=f"**Gebruiker:** {member.mention if actie != 'unban' else ban_entry.user}\n**Reden:** {reden}\n**Door:** {interaction.user.mention}",
                         color=discord.Color.red()
                     )
                     await log_channel.send(embed=embed)
 
-            await interaction.response.send_message(f"✅ Actie {actie} uitgevoerd op {member.mention}", ephemeral=True)
+            await interaction.response.send_message(f"✅ Actie {actie} uitgevoerd.", ephemeral=True)
+
         except Exception as e:
-            await interaction.response.send_message(f"❌ Fout bij uitvoeren: {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Fout bij {actie}: {e}", ephemeral=True)
+
 
 class ModeratieView(View):
     def __init__(self, author: discord.Member):
@@ -354,13 +352,14 @@ class ModeratieView(View):
         self.target_member: discord.Member = None
         self.actie: str = None
         self.reden: str = None
+        self.user_id_to_unban: int = None
 
-        # UserSelect item
+        # User select
         user_select = UserSelect(placeholder="Kies een gebruiker", min_values=1, max_values=1)
         user_select.callback = self._user_selected
         self.add_item(user_select)
 
-        # Buttons: Ban, Kick, Warn, Unban
+        # Buttons
         for label, style, attr in [
             ("Ban", discord.ButtonStyle.danger, "ban"),
             ("Kick", discord.ButtonStyle.primary, "kick"),
@@ -372,15 +371,18 @@ class ModeratieView(View):
             self.add_item(btn)
 
     async def _user_selected(self, interaction: discord.Interaction):
-        sel_vals = interaction.data.get("values", [])
-        if sel_vals:
-            selected_id = int(sel_vals[0])
-            selected = interaction.guild.get_member(selected_id) or await interaction.guild.fetch_member(selected_id)
-        else:
+        try:
+            sel_vals = interaction.data.get("values", [])
+            if sel_vals:
+                selected_id = int(sel_vals[0])
+                selected = interaction.guild.get_member(selected_id) or await interaction.guild.fetch_member(selected_id)
+            else:
+                selected = None
+        except:
             selected = None
 
         if selected is None:
-            await interaction.response.send_message("❌ Kon gebruiker niet vinden.", ephemeral=True)
+            await interaction.response.send_message("❌ Kon geselecteerde gebruiker niet vinden.", ephemeral=True)
             return
 
         self.target_member = selected
@@ -388,49 +390,38 @@ class ModeratieView(View):
 
     def make_callback(self, actie):
         async def callback(interaction: discord.Interaction):
-            # Controleer permissies
-            roles = UNBAN_ROLES if actie == "unban" else ALLOWED_ROLES
-            if not any(r.id in roles for r in interaction.user.roles):
-                await interaction.response.send_message("❌ Je hebt hier geen toestemming voor.", ephemeral=True)
+            ALLOWED_UNBAN_ROLES = {
+                1402418357596061756, 1402418713612910663, 1403013958562218054,
+                1342974632524775527, 1342974632524775528, 1405597740494356631,
+                1402419665808134395
+            }
+            if not any(r.id in ALLOWED_ROLES or (actie == "unban" and r.id in ALLOWED_UNBAN_ROLES) for r in interaction.user.roles):
+                await interaction.response.send_message("❌ Je hebt geen toegang tot dit menu.", ephemeral=True)
                 return
 
             if actie == "unban":
-                # Modal voor user ID + reden
-                class UnbanModal(Modal, title="Unban gebruiker"):
-                    user_id = TextInput(label="User ID", style=discord.TextStyle.short, placeholder="Discord ID", required=True)
-                    reason = TextInput(label="Reden", style=discord.TextStyle.paragraph, placeholder="Reden (optioneel)", required=False)
-
-                    async def on_submit(self2, modal_interaction: discord.Interaction):
-                        try:
-                            uid = int(self2.user_id.value.strip())
-                            reason_text = self2.reason.value or "Geen reden opgegeven"
-                            bans = await interaction.guild.bans()
-                            target_ban = next((b for b in bans if b.user.id == uid), None)
-                            if not target_ban:
-                                await modal_interaction.response.send_message("❌ Deze gebruiker is niet geband.", ephemeral=True)
-                                return
-                            await interaction.guild.unban(target_ban.user, reason=reason_text)
-                            # Log
-                            log_channel = interaction.guild.get_channel(LOG_CHANNELS["unban"])
-                            if log_channel:
-                                embed = discord.Embed(
-                                    title="Unban uitgevoerd",
-                                    description=f"**Gebruiker:** {target_ban.user} (`{target_ban.user.id}`)\n**Door:** {interaction.user.mention}\n**Reden:** {reason_text}",
-                                    color=discord.Color.green(),
-                                    timestamp=datetime.now(timezone.utc)
-                                )
-                                await log_channel.send(embed=embed)
-                            await modal_interaction.response.send_message(f"✅ Unbanned: {target_ban.user} (`{target_ban.user.id}`)", ephemeral=True)
-                        except Exception as e:
-                            await modal_interaction.response.send_message(f"❌ Fout bij unban: {e}", ephemeral=True)
-
-                await interaction.response.send_modal(UnbanModal())
+                # Vraag ID van de te unbannen gebruiker
+                modal = TextInputModal(title="Unban", label="User ID van te unbannen gebruiker")
+                self.user_id_to_unban = None  # reset
+                await interaction.response.send_modal(modal)
+                self.actie = "unban"
             else:
                 if self.target_member is None:
                     await interaction.response.send_message("❌ Kies eerst een gebruiker.", ephemeral=True)
                     return
                 self.actie = actie
                 await interaction.response.send_modal(ModeratieModal(self))
+
+        class TextInputModal(Modal, title="User ID invoeren"):
+            user_id_input = TextInput(label="User ID", placeholder="Bijv. 123456789012345678", required=True)
+
+            async def on_submit(self2, interaction2: discord.Interaction):
+                try:
+                    self.user_id_to_unban = int(self2.user_id_input.value.strip())
+                    await interaction2.response.send_modal(ModeratieModal(self))
+                except:
+                    await interaction2.response.send_message("❌ Ongeldige User ID.", ephemeral=True)
+
         return callback
 
 # ------------------- Moderatie command -------------------
