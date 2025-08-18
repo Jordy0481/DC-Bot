@@ -415,135 +415,120 @@ LOG_CHANNELS = {
     "timeout": 1405586885384081448
 }
 
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
 
-class ModeratieView(ui.View):
-    def __init__(self, moderator: discord.Member):
+bot = commands.Bot(command_prefix="/", intents=intents)
+
+# ------------------- Moderatie View -------------------
+class ModeratieView(discord.ui.View):
+    def __init__(self, author):
         super().__init__(timeout=None)
-        self.moderator = moderator
-        self.target_member: discord.Member | None = None
-        self.actie: str | None = None
-        self.duur_sec: int | None = None
-        self.reden: str | None = None
+        self.author = author
+        self.target_member = None
+        self.actie = None
+        self.reden = None
+        self.duur_sec = None
 
-        # Voeg UserSelect toe
-        self.add_item(UserSelect(placeholder="Kies een gebruiker",
-                                 min_values=1, max_values=1,
-                                 custom_id="moderatie_user_select"))
-
-        # Voeg actie dropdown toe
-        self.add_item(ActieSelect())
-
-        # Voeg execute knop toe
-        self.add_item(ExecuteButton())
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # Check of de gebruiker een moderator rol heeft
-        if any(r.id in MOD_ROLES for r in interaction.user.roles):
-            return True
-        await interaction.response.send_message("❌ Geen toegang tot deze moderatie.", ephemeral=True)
-        return False
-
-
-class UserSelect(ui.UserSelect):
-    async def callback(self, interaction: discord.Interaction):
-        view: ModeratieView = self.view
-        view.target_member = self.values[0]
-        await interaction.response.send_message(f"✅ Gebruiker geselecteerd: {view.target_member.mention}", ephemeral=True)
-
-
-class ActieSelect(ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label="Ban", value="ban"),
-            discord.SelectOption(label="Kick", value="kick"),
-            discord.SelectOption(label="Warn", value="warn"),
-            discord.SelectOption(label="Timeout", value="timeout"),
-        ]
-        super().__init__(placeholder="Kies een actie", options=options, custom_id="moderatie_actie")
-
-    async def callback(self, interaction: discord.Interaction):
-        view: ModeratieView = self.view
-        view.actie = self.values[0]
-        await interaction.response.send_message(f"✅ Actie geselecteerd: {view.actie}", ephemeral=True)
-
-
-class ExecuteButton(ui.Button):
-    def __init__(self):
-        super().__init__(label="Uitvoeren", style=discord.ButtonStyle.danger, custom_id="moderatie_execute")
-
-    async def callback(self, interaction: discord.Interaction):
-        view: ModeratieView = self.view
-        if not view.target_member or not view.actie:
-            await interaction.response.send_message("❌ Kies eerst een gebruiker en een actie.", ephemeral=True)
+    # Gebruiker kiezen
+    @discord.ui.UserSelect(placeholder="Kies een gebruiker", min_values=1, max_values=1)
+    async def select_user(self, select: discord.ui.UserSelect, interaction: discord.Interaction):
+        if not any(r.id in MOD_ROLES for r in interaction.user.roles):
+            await interaction.response.send_message("❌ Je hebt geen toegang.", ephemeral=True)
             return
+        self.target_member = select.values[0]
+        await interaction.response.send_message(f"✅ Gebruiker gekozen: {self.target_member.mention}", ephemeral=True)
 
-        # Stuur modal voor reden en (optionele) timeout
-        await interaction.response.send_modal(ModeratieModal(view))
+    # Actie buttons
+    @discord.ui.Button(label="Ban", style=discord.ButtonStyle.danger)
+    async def ban_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        self.actie = "ban"
+        await interaction.response.send_modal(ModeratieModal(self))
 
+    @discord.ui.Button(label="Kick", style=discord.ButtonStyle.danger)
+    async def kick_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        self.actie = "kick"
+        await interaction.response.send_modal(ModeratieModal(self))
 
-class ModeratieModal(ui.Modal, title="Reden en Opties"):
-    reden = ui.TextInput(label="Reden", style=discord.TextStyle.paragraph, placeholder="Geef een reden", required=True)
-    duur = ui.TextInput(label="Timeout in seconden (alleen bij Timeout)", style=discord.TextStyle.short,
-                        placeholder="Laat leeg indien niet van toepassing", required=False)
+    @discord.ui.Button(label="Warn", style=discord.ButtonStyle.secondary)
+    async def warn_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        self.actie = "warn"
+        await interaction.response.send_modal(ModeratieModal(self))
+
+    @discord.ui.Button(label="Timeout", style=discord.ButtonStyle.primary)
+    async def timeout_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        self.actie = "timeout"
+        await interaction.response.send_modal(ModeratieModal(self))
+
+# ------------------- Modal -------------------
+class ModeratieModal(discord.ui.Modal, title="Reden en Opties"):
+    reden = discord.ui.TextInput(label="Reden", style=discord.TextStyle.paragraph, placeholder="Geef een reden", required=True)
+    duur = discord.ui.TextInput(label="Timeout in seconden (alleen bij Timeout)", style=discord.TextStyle.short, placeholder="Laat leeg indien niet van toepassing", required=False)
 
     def __init__(self, view: ModeratieView):
         super().__init__()
         self.view_ref = view
 
- async def on_submit(self, interaction: discord.Interaction):
-    view = self.view_ref
-    view.reden = self.reden.value
-    if view.actie == "timeout" and self.duur.value.isdigit():
-        view.duur_sec = int(self.duur.value)
-    else:
-        view.duur_sec = None
+    async def on_submit(self, interaction: discord.Interaction):
+        view = self.view_ref
+        view.reden = self.reden.value
+        if view.actie == "timeout" and self.duur.value.isdigit():
+            view.duur_sec = int(self.duur.value)
+        else:
+            view.duur_sec = None
 
-    member = view.target_member
-    actie = view.actie
-    reden = view.reden
+        member = view.target_member
+        actie = view.actie
+        reden = view.reden
 
-    try:
-        if actie == "ban":
-            await member.ban(reason=reden)
-        elif actie == "kick":
-            await member.kick(reason=reden)
-        elif actie == "warn":
-            pass  # je eigen warn systeem hier
-        elif actie == "timeout":
-            if view.duur_sec is None:
-                await interaction.response.send_message(
-                    "❌ Geef een geldige duur voor timeout.", ephemeral=True
-                )
-                return
+        try:
+            if actie == "ban":
+                await member.ban(reason=reden)
+            elif actie == "kick":
+                await member.kick(reason=reden)
+            elif actie == "warn":
+                pass  # eigen warn systeem triggeren
+            elif actie == "timeout":
+                if view.duur_sec is None:
+                    await interaction.response.send_message("❌ Geef een geldige duur voor timeout.", ephemeral=True)
+                    return
+                until_time = datetime.now(tz=timezone.utc) + timedelta(seconds=view.duur_sec)
+                await member.timeout(until=until_time, reason=reden)
 
-            until_time = datetime.now(tz=timezone.utc) + timedelta(seconds=view.duur_sec)
-            await member.timeout(until=until_time, reason=reden)
+            # Logs
+            log_channel_id = LOG_CHANNELS.get(actie)
+            if log_channel_id:
+                log_channel = interaction.guild.get_channel(log_channel_id)
+                if log_channel:
+                    embed = discord.Embed(
+                        title=f"{actie.capitalize()} uitgevoerd",
+                        description=f"**Gebruiker:** {member.mention}\n**Reden:** {reden}\n**Door:** {interaction.user.mention}",
+                        color=discord.Color.red()
+                    )
+                    await log_channel.send(embed=embed)
 
-        # Loggen
-        log_channel_id = LOG_CHANNELS.get(actie)
-        if log_channel_id:
-            log_channel = interaction.guild.get_channel(log_channel_id)
-            if log_channel:
-                embed = discord.Embed(
-                    title=f"{actie.capitalize()} uitgevoerd",
-                    description=f"**Gebruiker:** {member.mention}\n**Reden:** {reden}\n**Door:** {interaction.user.mention}",
-                    color=discord.Color.red()
-                )
-                await log_channel.send(embed=embed)
+            await interaction.response.send_message(f"✅ Actie {actie} uitgevoerd op {member.mention}", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Fout bij uitvoeren: {e}", ephemeral=True)
 
-        await interaction.response.send_message(
-            f"✅ Actie {actie} uitgevoerd op {member.mention}", ephemeral=True
-        )
-
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Fout bij uitvoeren: {e}", ephemeral=True)
-
-
-# Slash command om het menu te tonen
+# ------------------- Slash Command -------------------
 @bot.tree.command(name="moderatie", description="Open het moderatie UI menu", guild=discord.Object(id=GUILD_ID))
 async def moderatie(interaction: discord.Interaction):
+    if not any(r.id in MOD_ROLES for r in interaction.user.roles):
+        await interaction.response.send_message("❌ Je hebt geen toegang.", ephemeral=True)
+        return
     await interaction.response.send_message("Moderatie menu:", view=ModeratieView(interaction.user), ephemeral=True)
 
+# ------------------- Bot Ready -------------------
+@bot.event
+async def on_ready():
+    print(f"✅ Bot ingelogd als {bot.user}")
+    try:
+        synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        print(f"🌐 Slash commands gesynchroniseerd: {len(synced)}")
+    except Exception as e:
+        print(f"❌ Fout bij sync: {e}")
 # ------------------- Start Bot -------------------
 keep_alive()
 
