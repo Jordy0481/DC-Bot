@@ -398,6 +398,123 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
             except Exception as e:
                 print(f"Kon rol niet verwijderen: {e}")
 
+# ------------------- Moderatie Menu -------------------
+class ModeratieMenu(discord.ui.View):
+    def __init__(self, target: discord.Member, moderator: discord.Member):
+        super().__init__(timeout=60)
+        self.target = target
+        self.moderator = moderator
+
+    @discord.ui.button(label="Ban", style=discord.ButtonStyle.danger)
+    async def ban(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_action(interaction, "ban")
+
+    @discord.ui.button(label="Kick", style=discord.ButtonStyle.secondary)
+    async def kick(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_action(interaction, "kick")
+
+    @discord.ui.button(label="Warn", style=discord.ButtonStyle.primary)
+    async def warn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_action(interaction, "warn")
+
+    @discord.ui.button(label="Timeout", style=discord.ButtonStyle.success)
+    async def timeout(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_action(interaction, "timeout")
+
+    async def handle_action(self, interaction: discord.Interaction, action: str):
+        if interaction.user != self.moderator:
+            await interaction.response.send_message("❌ Dit is niet jouw menu.", ephemeral=True)
+            return
+
+        class ReasonModal(discord.ui.Modal, title=f"Reden voor {action.capitalize()}"):
+            reden = discord.ui.TextInput(
+                label="Reden",
+                style=discord.TextStyle.paragraph,
+                placeholder="Bijv. spammen, schelden, regels overtreden",
+                required=True,
+                max_length=500
+            )
+            duur = discord.ui.TextInput(
+                label="Timeout duur (bijv. 10m, 2h, 1d) - alleen bij timeout",
+                style=discord.TextStyle.short,
+                required=False
+            )
+
+            async def on_submit(self, modal_interaction: discord.Interaction):
+                reason = self.reden.value
+                guild = modal_interaction.guild
+
+                log_channels = {
+                    "ban": 1405586824847556769,
+                    "kick": 1405586854442569749,
+                    "warn": 1406995238404231299,
+                    "timeout": 1405586885384081448
+                }
+                log_channel = guild.get_channel(log_channels[action])
+
+                # Actie uitvoeren
+                if action == "ban":
+                    await self.target.ban(reason=reason, delete_message_days=0)
+                elif action == "kick":
+                    await self.target.kick(reason=reason)
+                elif action == "warn":
+                    await modal_interaction.response.send_message(
+                        f"⚠️ {self.target.mention} is gewaarschuwd. Reden: {reason}", ephemeral=True
+                    )
+                elif action == "timeout":
+                    duration_map = {"m": 60, "h": 3600, "d": 86400}
+                    seconds = 0
+                    if self.duur.value:
+                        try:
+                            unit = self.duur.value[-1]
+                            num = int(self.duur.value[:-1])
+                            if unit in duration_map:
+                                seconds = num * duration_map[unit]
+                        except:
+                            pass
+                    if seconds > 0:
+                        await self.target.timeout(discord.utils.utcnow() + discord.timedelta(seconds=seconds), reason=reason)
+
+                # Log versturen
+                if log_channel:
+                    embed = discord.Embed(
+                        title=f"{action.capitalize()} uitgevoerd",
+                        description=f"**Lid:** {self.target.mention}\n**Moderator:** {self.moderator.mention}\n**Reden:** {reason}",
+                        color=discord.Color.red()
+                    )
+                    await log_channel.send(embed=embed)
+
+                await modal_interaction.response.send_message(f"✅ {action.capitalize()} uitgevoerd op {self.target.mention}", ephemeral=True)
+
+        await interaction.response.send_modal(ReasonModal())
+
+
+@bot.tree.command(
+    name="moderatie",
+    description="Open een moderatie menu voor een gebruiker",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def moderatie(interaction: discord.Interaction, member: discord.Member):
+    allowed_roles = {
+        1402418357596061756,
+        1402418713612910663,
+        1403013958562218054,
+        1342974632524775528,
+        1405597740494356631,
+        1402419665808134395
+    }
+
+    if not any(r.id in allowed_roles for r in interaction.user.roles):
+        await interaction.response.send_message("❌ Je hebt geen toegang tot dit commando.", ephemeral=True)
+        return
+
+    view = ModeratieMenu(member, interaction.user)
+    await interaction.response.send_message(
+        f"⚖️ Kies een actie voor {member.mention}:",
+        view=view,
+        ephemeral=True
+    )
+
 
 # ------------------- Start Bot -------------------
 keep_alive()
