@@ -404,6 +404,24 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
             except Exception as e:
                 print(f"Kon rol niet verwijderen: {e}")
 
+
+# Moderation roles allowed
+ALLOWED_ROLES = {
+    1402418357596061756,
+    1402418713612910663,
+    1403013958562218054,
+    1342974632524775528,
+    1405597740494356631,
+    1402419665808134395
+}
+
+# Log channels
+LOG_CHANNELS = {
+    "ban": 1405586824847556769,
+    "kick": 1405586854442569749,
+    "warn": 1406995238404231299,
+    "timeout": 1405586885384081448
+}
 # ------------------- Moderatie UI (fixed & robust) -------------------
 class ModeratieModal(Modal, title="Reden en opties"):
     reden = TextInput(label="Reden", style=discord.TextStyle.paragraph, placeholder="Geef een reden", required=True)
