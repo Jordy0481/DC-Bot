@@ -469,47 +469,61 @@ class ModeratieModal(Modal, title="Reden en opties"):
 
 
 # ------------------- Moderatie View -------------------
-class ModeratieView(View):
+class ModeratieView(discord.ui.View):
     def __init__(self, author: discord.Member):
         super().__init__(timeout=None)
         self.author = author
-        self.target_member: discord.Member = None
-        self.actie: str = None
-        self.reden: str = None
-        self.duur_sec: int = None
+        self.target_member: discord.Member | None = None
+        self.actie: str | None = None
+        self.reden: str | None = None
+        self.duur_sec: int | None = None
 
-        # Knoppen
+        # Knoppen (dynamisch toevoegen)
         for label, style, attr in [
             ("Ban", discord.ButtonStyle.danger, "ban"),
             ("Kick", discord.ButtonStyle.primary, "kick"),
             ("Warn", discord.ButtonStyle.secondary, "warn"),
             ("Timeout", discord.ButtonStyle.success, "timeout")
         ]:
-            btn = Button(label=label, style=style)
-            btn.callback = self.make_callback(attr)
+            btn = discord.ui.Button(label=label, style=style)
+            # bind een callback die de actie instelt en de modal opent
+            async def btn_cb(interaction: discord.Interaction, actie=attr):
+                if not any(r.id in ALLOWED_ROLES for r in interaction.user.roles):
+                    await interaction.response.send_message("❌ Je hebt geen toegang tot dit menu.", ephemeral=True)
+                    return
+                if self.target_member is None:
+                    await interaction.response.send_message("❌ Kies eerst een gebruiker.", ephemeral=True)
+                    return
+                self.actie = actie
+                await interaction.response.send_modal(ModeratieModal(self))
+            btn.callback = btn_cb
             self.add_item(btn)
 
-    # Dynamische callback voor elke actie
-    def make_callback(self, actie):
-        async def callback(interaction: discord.Interaction):
-            if not any(r.id in ALLOWED_ROLES for r in interaction.user.roles):
-                await interaction.response.send_message("❌ Je hebt geen toegang tot dit menu.", ephemeral=True)
-                return
+        # UserSelect (voeg als item toe i.p.v. decorator)
+        user_select = discord.ui.UserSelect(placeholder="Kies een gebruiker", min_values=1, max_values=1)
 
-            if self.target_member is None:
-                await interaction.response.send_message("❌ Kies eerst een gebruiker.", ephemeral=True)
-                return
+        async def user_select_cb(interaction: discord.Interaction, select: discord.ui.UserSelect):
+            # select.values kan afhankelijk van de versie Member-objecten of str-id's bevatten
+            chosen = select.values[0]
+            if isinstance(chosen, discord.Member):
+                self.target_member = chosen
+            else:
+                # probeer member op te halen als het een id-string is
+                try:
+                    member = interaction.guild.get_member(int(chosen))
+                    if member is None:
+                        member = await interaction.guild.fetch_member(int(chosen))
+                    self.target_member = member
+                except Exception:
+                    self.target_member = None
 
-            self.actie = actie
-            await interaction.response.send_modal(ModeratieModal(self))
-        return callback
+            if self.target_member:
+                await interaction.response.send_message(f"✅ Gebruiker gekozen: {self.target_member.mention}", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Kon gebruiker niet vinden.", ephemeral=True)
 
-    # User select
-    @UserSelect(placeholder="Kies een gebruiker", min_values=1, max_values=1)
-    async def select_user(self, interaction: discord.Interaction, select: UserSelect):
-        self.target_member = select.values[0]
-        await interaction.response.send_message(f"✅ Gebruiker gekozen: {self.target_member.mention}", ephemeral=True)
-
+        user_select.callback = user_select_cb
+        self.add_item(user_select)
 # ------------------- Bot Ready -------------------
 @bot.event
 async def on_ready():
