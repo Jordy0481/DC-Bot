@@ -454,24 +454,25 @@ class ModeratieModal(Modal, title="Reden en opties"):
             elif actie == "warn":
                 # add warn-handling here if you want persistent warns
                 pass
-            elif actie == "timeout":
+            eelif actie == "timeout":
                 if view.duur_sec is None:
                     await interaction.response.send_message("❌ Geef een geldige duur voor timeout.", ephemeral=True)
                     return
-               until_time = datetime.now(timezone.utc) + timedelta(seconds=view.duur_sec)
 
-            try:
-                # sommige discord.py builds verwachten een positioneel arg
-                   await member.timeout(until_time, reason=reden)
-               except TypeError:
-                # fallback: oudere/newer builds kunnen member.edit(timed_out_until=...) verwachten
-                 try:
-                    await member.edit(timed_out_until=until_time, reason=reden)
-                   except Exception as e:
-                    # meld en raise zodat je de echte fout ziet
-                    await interaction.response.send_message(f"❌ Tijdout kon niet worden gezet: {e}", ephemeral=True)
-                    return
+                until_time = datetime.now(timezone.utc) + timedelta(seconds=view.duur_sec)
 
+                # robust: some discord.py builds accept positioneel argument, others expect edit(...)
+                try:
+                    # positioneel until arg (works on some builds)
+                    await member.timeout(until_time, reason=reden)
+                except TypeError:
+                    # fallback: timed_out_until via edit
+                    try:
+                        await member.edit(timed_out_until=until_time, reason=reden)
+                    except Exception as e:
+                        await interaction.response.send_message(f"❌ Timeout kon niet worden gezet: {e}", ephemeral=True)
+                        return
+                        
             # Logging
             log_channel_id = LOG_CHANNELS.get(actie)
             if log_channel_id:
