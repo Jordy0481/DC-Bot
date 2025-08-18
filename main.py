@@ -510,9 +510,14 @@ class ModeratieModal(ui.Modal, title="Reden en Opties"):
                 pass  # hier zou je je eigen warn systeem triggeren
             elif actie == "timeout":
                 if view.duur_sec is None:
-                    await interaction.response.send_message("❌ Geef een geldige duur voor timeout.", ephemeral=True)
-                    return
-                await member.timeout(duration=timedelta(seconds=view.duur_sec), reason=reden)
+                   # bij timeout actie:
+            if view.duur_sec is None:
+                await interaction.response.send_message("❌ Geef een geldige duur voor timeout.", ephemeral=True)
+            return
+
+            # correcte manier:
+               until_time = datetime.now(tz=timezone.utc) + timedelta(seconds=view.duur_sec)
+            await member.timeout(until=until_time, reason=reden)
 
             log_channel_id = LOG_CHANNELS.get(actie)
             if log_channel_id:
