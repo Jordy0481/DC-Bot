@@ -67,7 +67,7 @@ async def ping(interaction: discord.Interaction):
 # ------------------- Start Bot -------------------
 keep_alive()
 
-TOKEN = os.getenv("TOKEN")  # gebruik "TOKEN" als env variable in Koyeb
+TOKEN = os.getenv("DISCORD_TOKEN")  # gebruik "TOKEN" als env variable in Koyeb
 if not TOKEN:
     print("❌ Geen Discord TOKEN gevonden in environment variables!")
 else:
