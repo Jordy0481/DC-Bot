@@ -416,7 +416,6 @@ LOG_CHANNELS = {
     "timeout": 1405586885384081448
 }
 
-# ------------------- Modal -------------------
 class ModeratieModal(discord.ui.Modal):
     def __init__(self, target: discord.Member, actie: str):
         super().__init__(title=f"Moderatie: {actie.capitalize()}")
@@ -443,12 +442,6 @@ class ModeratieModal(discord.ui.Modal):
             self.add_item(self.duur)
 
     async def on_submit(self, interaction: discord.Interaction):
-        if not any(r.id in MOD_ROLES for r in interaction.user.roles):
-            await interaction.response.send_message(
-                "❌ Je hebt geen toestemming om moderatie uit te voeren.", ephemeral=True
-            )
-            return
-
         target = self.target
         actie = self.actie
         reden = self.reden.value
@@ -466,7 +459,6 @@ class ModeratieModal(discord.ui.Modal):
             elif actie == "warn":
                 msg = f"⚠️ {target} is gewaarschuwd | Reden: {reden}"
             elif actie == "timeout":
-                # Tijd omzetten
                 import re
                 m = re.match(r"(\d+)([smhd])", duur.value.strip())
                 if not m:
@@ -489,24 +481,62 @@ class ModeratieModal(discord.ui.Modal):
             await interaction.response.send_message(f"Fout bij uitvoeren: {e}", ephemeral=True)
 
 
-# ------------------- Slash Command -------------------
-@bot.tree.command(name="moderatie",
-                  description="Open het moderatie menu",
-                  guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    gebruiker="Kies een gebruiker",
-    actie="Kies actie: ban/kick/warn/timeout"
-)
-async def moderatie(interaction: discord.Interaction, gebruiker: discord.Member, actie: str):
+class ModeratieSelectView(discord.ui.View):
+    def __init__(self, guild: discord.Guild):
+        super().__init__()
+        self.guild = guild
+
+        options_users = [
+            discord.SelectOption(label=member.display_name, value=str(member.id))
+            for member in guild.members if not member.bot
+        ]
+        self.add_item(ModeratieUserSelect(options_users, self.guild))
+
+class ModeratieUserSelect(discord.ui.Select):
+    def __init__(self, options, guild):
+        super().__init__(placeholder="Kies een gebruiker", options=options, min_values=1, max_values=1)
+        self.guild = guild
+
+    async def callback(self, interaction: discord.Interaction):
+        member_id = int(self.values[0])
+        member = self.guild.get_member(member_id)
+        await interaction.response.send_message(
+            "Kies nu een actie:",
+            view=ModeratieActionSelect(member, self.guild),
+            ephemeral=True
+        )
+
+class ModeratieActionSelect(discord.ui.View):
+    def __init__(self, member: discord.Member, guild: discord.Guild):
+        super().__init__()
+        self.add_item(ModeratieActionDropdown(member))
+        self.guild = guild
+
+class ModeratieActionDropdown(discord.ui.Select):
+    def __init__(self, member: discord.Member):
+        options = [
+            discord.SelectOption(label="Ban", value="ban"),
+            discord.SelectOption(label="Kick", value="kick"),
+            discord.SelectOption(label="Warn", value="warn"),
+            discord.SelectOption(label="Timeout", value="timeout")
+        ]
+        super().__init__(placeholder="Kies een actie", options=options, min_values=1, max_values=1)
+        self.member = member
+
+    async def callback(self, interaction: discord.Interaction):
+        actie = self.values[0]
+        modal = ModeratieModal(self.member, actie)
+        await interaction.response.send_modal(modal)
+
+# Slash command om menu te openen
+@bot.tree.command(name="moderatie", description="Open het moderatie menu", guild=discord.Object(id=GUILD_ID))
+async def moderatie(interaction: discord.Interaction):
     if not any(r.id in MOD_ROLES for r in interaction.user.roles):
         await interaction.response.send_message("❌ Je hebt geen toegang tot dit commando.", ephemeral=True)
         return
 
-    actie = actie.lower()
-    if actie not in ["ban", "kick", "warn", "timeout"]:
-        await interaction.response.send_message("Ongeldige actie. Kies ban/kick/warn/timeout", ephemeral=True)
-        return
-
+    view = ModeratieSelectView(interaction.guild)
+    await interaction.response.send_message("Kies een gebruiker om te modereren:", view=view, ephemeral=True)
     modal = ModeratieModal()
     await interaction.response.send_modal(modal)
 # ------------------- Start Bot -------------------
