@@ -422,7 +422,7 @@ LOG_CHANNELS = {
     "warn": 1406995238404231299,
     "timeout": 1405586885384081448
 }
-# ------------------- Moderatie UI (fixed & robust) -------------------
+ ------------------- Moderatie UI (fixed & robust) -------------------
 class ModeratieModal(Modal, title="Reden en opties"):
     reden = TextInput(label="Reden", style=discord.TextStyle.paragraph, placeholder="Geef een reden", required=True)
     duur = TextInput(label="Timeout in seconden (alleen bij timeout)", style=discord.TextStyle.short,
@@ -477,7 +477,6 @@ class ModeratieModal(Modal, title="Reden en opties"):
         except Exception as e:
             await interaction.response.send_message(f"❌ Fout bij uitvoeren: {e}", ephemeral=True)
 
-
 class ModeratieView(View):
     def __init__(self, author: discord.Member):
         super().__init__(timeout=None)
@@ -488,7 +487,7 @@ class ModeratieView(View):
         self.duur_sec: int = None
 
         # Add a UserSelect item programmatically (safer across versions)
-        user_select = discord.ui.UserSelect(placeholder="Kies een gebruiker", min_values=1, max_values=1)
+        user_select = UserSelect(placeholder="Kies een gebruiker", min_values=1, max_values=1)
         user_select.callback = self._user_selected
         self.add_item(user_select)
 
@@ -504,21 +503,14 @@ class ModeratieView(View):
             self.add_item(btn)
 
     async def _user_selected(self, interaction: discord.Interaction):
-        # select.values[0] is a Member in modern discord.py; handle fallback
-        try:
-            val = interaction.data.get("resolved", {}).get("members")  # fallback not required normally
-        except:
-            val = None
-
-        # The callback is called on the UserSelect instance: use interaction.data to get selected id OR the component's values
-        # Simpler: use the component (select) from interaction to fetch selected user ID
-        selected = None
-        # interaction.data['values'] exists with the selected id(s)
+        # interaction.data['values'] should hold the selected user id(s)
         try:
             sel_vals = interaction.data.get("values", [])
             if sel_vals:
                 selected_id = int(sel_vals[0])
                 selected = interaction.guild.get_member(selected_id) or await interaction.guild.fetch_member(selected_id)
+            else:
+                selected = None
         except:
             selected = None
 
@@ -540,7 +532,6 @@ class ModeratieView(View):
             self.actie = actie
             await interaction.response.send_modal(ModeratieModal(self))
         return callback
-
 
 # ------------------- Moderatie command -------------------
 @bot.tree.command(name="moderatie", description="Open het moderatie UI menu", guild=discord.Object(id=GUILD_ID))
