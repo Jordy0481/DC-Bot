@@ -458,8 +458,19 @@ class ModeratieModal(Modal, title="Reden en opties"):
                 if view.duur_sec is None:
                     await interaction.response.send_message("❌ Geef een geldige duur voor timeout.", ephemeral=True)
                     return
-                until_time = datetime.now(timezone.utc) + timedelta(seconds=view.duur_sec)
-                await member.timeout(until=until_time, reason=reden)
+               until_time = datetime.now(timezone.utc) + timedelta(seconds=view.duur_sec)
+
+            try:
+                # sommige discord.py builds verwachten een positioneel arg
+                   await member.timeout(until_time, reason=reden)
+               except TypeError:
+                # fallback: oudere/newer builds kunnen member.edit(timed_out_until=...) verwachten
+                 try:
+                    await member.edit(timed_out_until=until_time, reason=reden)
+                   except Exception as e:
+                    # meld en raise zodat je de echte fout ziet
+                    await interaction.response.send_message(f"❌ Tijdout kon niet worden gezet: {e}", ephemeral=True)
+                    return
 
             # Logging
             log_channel_id = LOG_CHANNELS.get(actie)
