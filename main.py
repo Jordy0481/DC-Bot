@@ -524,15 +524,7 @@ class ModeratieView(discord.ui.View):
 
         user_select.callback = user_select_cb
         self.add_item(user_select)
-# ------------------- Bot Ready -------------------
-@bot.event
-async def on_ready():
-    print(f"✅ Bot ingelogd als {bot.user}")
-    try:
-        synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        print(f"🌐 Slash commands gesynchroniseerd: {len(synced)}")
-    except Exception as e:
-        print(f"❌ Fout bij sync: {e}")
+
 # ------------------- Start Bot -------------------
 keep_alive()
 
