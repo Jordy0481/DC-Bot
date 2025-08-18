@@ -490,47 +490,53 @@ class ModeratieModal(ui.Modal, title="Reden en Opties"):
         super().__init__()
         self.view_ref = view
 
-    async def on_submit(self, interaction: discord.Interaction):
-        view = self.view_ref
-        view.reden = self.reden.value
-        if view.actie == "timeout" and self.duur.value.isdigit():
-            view.duur_sec = int(self.duur.value)
-        else:
-            view.duur_sec = None
+ async def on_submit(self, interaction: discord.Interaction):
+    view = self.view_ref
+    view.reden = self.reden.value
+    if view.actie == "timeout" and self.duur.value.isdigit():
+        view.duur_sec = int(self.duur.value)
+    else:
+        view.duur_sec = None
 
-        member = view.target_member
-        actie = view.actie
-        reden = view.reden
-        try:
-            if actie == "ban":
-                await member.ban(reason=reden)
-            elif actie == "kick":
-                await member.kick(reason=reden)
-            elif actie == "warn":
-                pass  # hier zou je je eigen warn systeem triggeren
-            elif actie == "timeout":
-                if view.duur_sec is None:
-                   # bij timeout actie:
+    member = view.target_member
+    actie = view.actie
+    reden = view.reden
+
+    try:
+        if actie == "ban":
+            await member.ban(reason=reden)
+        elif actie == "kick":
+            await member.kick(reason=reden)
+        elif actie == "warn":
+            pass  # je eigen warn systeem hier
+        elif actie == "timeout":
             if view.duur_sec is None:
-                await interaction.response.send_message("❌ Geef een geldige duur voor timeout.", ephemeral=True)
-            return
+                await interaction.response.send_message(
+                    "❌ Geef een geldige duur voor timeout.", ephemeral=True
+                )
+                return
 
-            # correcte manier:
-               until_time = datetime.now(tz=timezone.utc) + timedelta(seconds=view.duur_sec)
+            until_time = datetime.now(tz=timezone.utc) + timedelta(seconds=view.duur_sec)
             await member.timeout(until=until_time, reason=reden)
 
-            log_channel_id = LOG_CHANNELS.get(actie)
-            if log_channel_id:
-                log_channel = interaction.guild.get_channel(log_channel_id)
-                if log_channel:
-                    embed = discord.Embed(title=f"{actie.capitalize()} uitgevoerd",
-                                          description=f"**Gebruiker:** {member.mention}\n**Reden:** {reden}\n**Door:** {interaction.user.mention}",
-                                          color=discord.Color.red())
-                    await log_channel.send(embed=embed)
+        # Loggen
+        log_channel_id = LOG_CHANNELS.get(actie)
+        if log_channel_id:
+            log_channel = interaction.guild.get_channel(log_channel_id)
+            if log_channel:
+                embed = discord.Embed(
+                    title=f"{actie.capitalize()} uitgevoerd",
+                    description=f"**Gebruiker:** {member.mention}\n**Reden:** {reden}\n**Door:** {interaction.user.mention}",
+                    color=discord.Color.red()
+                )
+                await log_channel.send(embed=embed)
 
-            await interaction.response.send_message(f"✅ Actie {actie} uitgevoerd op {member.mention}", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Fout bij uitvoeren: {e}", ephemeral=True)
+        await interaction.response.send_message(
+            f"✅ Actie {actie} uitgevoerd op {member.mention}", ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Fout bij uitvoeren: {e}", ephemeral=True)
 
 
 # Slash command om het menu te tonen
