@@ -399,7 +399,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
             except Exception as e:
                 print(f"Kon rol niet verwijderen: {e}")
 
-# ---- SETTINGS ----
+# ------------------- Moderatie Menu -------------------
 MOD_ROLES = {
     1402418357596061756,
     1402418713612910663,
@@ -413,115 +413,105 @@ LOG_CHANNELS = {
     "ban": 1405586824847556769,
     "kick": 1405586854442569749,
     "warn": 1406995238404231299,
-    "timeout": 1405586885384081448,
+    "timeout": 1405586885384081448
 }
 
+class ModeratieModal(discord.ui.Modal, title="Moderatie Menu"):
+    member = discord.ui.TextInput(label="Gebruiker (mention of ID)", style=discord.TextStyle.short, required=True)
+    actie = discord.ui.TextInput(label="Actie (ban/kick/warn/timeout)", style=discord.TextStyle.short, required=True)
+    reden = discord.ui.TextInput(label="Reden", style=discord.TextStyle.paragraph, required=True)
+    duur = discord.ui.TextInput(label="Duur (voor timeout, bv. 10m, 2h, leeg voor niet)", style=discord.TextStyle.short, required=False)
 
-# ---- Timeout UI ----
-class TimeoutButtons(discord.ui.View):
-    def __init__(self, target: discord.Member, reason: str):
-        super().__init__(timeout=60)
-        self.target = target
-        self.reason = reason
-
-    async def apply_timeout(self, interaction: discord.Interaction, minutes: int):
+    async def on_submit(self, interaction: discord.Interaction):
+        # Check rollen
         if not any(r.id in MOD_ROLES for r in interaction.user.roles):
-            await interaction.response.send_message("❌ Geen toegang.", ephemeral=True)
+            await interaction.response.send_message("❌ Je hebt geen toegang tot dit menu.", ephemeral=True)
             return
 
-        until = discord.utils.utcnow() + discord.timedelta(minutes=minutes)
-        await self.target.timeout(until, reason=self.reason)
-
-        await interaction.response.send_message(
-            f"⏳ {self.target} in timeout voor {minutes} minuten.\n**Reden:** {self.reason}",
-            ephemeral=True
-        )
-
-        log_channel = interaction.client.get_channel(LOG_CHANNELS["timeout"])
-        await log_channel.send(
-            f"⏳ **Timeout:** {self.target} ({minutes}m) door {interaction.user}\n**Reden:** {self.reason}"
-        )
-
-    @discord.ui.button(label="5m", style=discord.ButtonStyle.primary)
-    async def five(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.apply_timeout(interaction, 5)
-
-    @discord.ui.button(label="10m", style=discord.ButtonStyle.primary)
-    async def ten(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.apply_timeout(interaction, 10)
-
-    @discord.ui.button(label="1h", style=discord.ButtonStyle.secondary)
-    async def hour(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.apply_timeout(interaction, 60)
-
-    @discord.ui.button(label="1d", style=discord.ButtonStyle.danger)
-    async def day(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.apply_timeout(interaction, 60 * 24)
-
-
-# ---- Moderation Menu ----
-class ModerationMenu(discord.ui.View):
-    def __init__(self, target: discord.Member, reason: str):
-        super().__init__(timeout=120)
-        self.target = target
-        self.reason = reason
-
-    @discord.ui.select(
-        placeholder="⚡ Kies een actie...",
-        min_values=1,
-        max_values=1,
-        options=[
-            discord.SelectOption(label="Ban", description="Verban de gebruiker", emoji="🔨"),
-            discord.SelectOption(label="Kick", description="Verwijder de gebruiker", emoji="👢"),
-            discord.SelectOption(label="Warn", description="Geef een waarschuwing", emoji="⚠️"),
-            discord.SelectOption(label="Timeout", description="Zet gebruiker in timeout", emoji="⏳"),
-        ],
-    )
-    async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
-        action = select.values[0].lower()
-
-        if not any(r.id in MOD_ROLES for r in interaction.user.roles):
-            await interaction.response.send_message("❌ Geen toegang.", ephemeral=True)
+        # Member ophalen
+        guild = interaction.guild
+        if not guild:
+            await interaction.response.send_message("❌ Kon de server niet vinden.", ephemeral=True)
+            return
+        try:
+            member_id = int(self.member.value.strip("<@!>"))
+            target = guild.get_member(member_id) or await guild.fetch_member(member_id)
+        except:
+            await interaction.response.send_message("❌ Ongeldige gebruiker.", ephemeral=True)
             return
 
-        log_channel = interaction.client.get_channel(LOG_CHANNELS[action])
+        actie = self.actie.value.lower()
+        reden = self.reden.value
+        duur_str = self.duur.value.strip()
 
-        if action == "ban":
-            await self.target.ban(reason=self.reason)
-            await interaction.response.send_message(f"✅ {self.target} is verbannen.\n**Reden:** {self.reason}", ephemeral=True)
-            await log_channel.send(f"🔨 **Ban:** {self.target} door {interaction.user}\n**Reden:** {self.reason}")
+        # Bepaal log kanaal
+        log_channel = None
+        if actie in LOG_CHANNELS:
+            log_channel = guild.get_channel(LOG_CHANNELS[actie])
 
-        elif action == "kick":
-            await self.target.kick(reason=self.reason)
-            await interaction.response.send_message(f"✅ {self.target} is gekickt.\n**Reden:** {self.reason}", ephemeral=True)
-            await log_channel.send(f"👢 **Kick:** {self.target} door {interaction.user}\n**Reden:** {self.reason}")
+        # Voer actie uit
+        try:
+            if actie == "ban":
+                await target.ban(reason=reden)
+                if log_channel:
+                    await log_channel.send(f"🔨 {target.mention} is gebanned door {interaction.user.mention}\nReden: {reden}")
+                await interaction.response.send_message(f"✅ {target.mention} gebanned", ephemeral=True)
 
-        elif action == "warn":
-            await interaction.response.send_message(f"⚠️ {self.target} is gewaarschuwd.\n**Reden:** {self.reason}", ephemeral=True)
-            await log_channel.send(f"⚠️ **Warn:** {self.target} door {interaction.user}\n**Reden:** {self.reason}")
+            elif actie == "kick":
+                await target.kick(reason=reden)
+                if log_channel:
+                    await log_channel.send(f"👢 {target.mention} is gekicked door {interaction.user.mention}\nReden: {reden}")
+                await interaction.response.send_message(f"✅ {target.mention} gekicked", ephemeral=True)
 
-        elif action == "timeout":
-            await interaction.response.send_message(
-                f"⏳ Kies een timeout duur voor **{self.target}**\n**Reden:** {self.reason}",
-                view=TimeoutButtons(self.target, self.reason),
-                ephemeral=True
-            )
+            elif actie == "warn":
+                if log_channel:
+                    await log_channel.send(f"⚠️ {target.mention} is gewaarschuwd door {interaction.user.mention}\nReden: {reden}")
+                await interaction.response.send_message(f"✅ {target.mention} gewaarschuwd", ephemeral=True)
+
+            elif actie == "timeout":
+                duration = None
+                if duur_str:
+                    try:
+                        unit = duur_str[-1]
+                        amount = int(duur_str[:-1])
+                        if unit == "s":
+                            duration = amount
+                        elif unit == "m":
+                            duration = amount * 60
+                        elif unit == "h":
+                            duration = amount * 3600
+                        elif unit == "d":
+                            duration = amount * 86400
+                    except:
+                        await interaction.response.send_message("❌ Ongeldige duur. Gebruik bv. 10m of 2h", ephemeral=True)
+                        return
+                if duration is None:
+                    await target.timeout(None, reason=reden)
+                    await interaction.response.send_message(f"✅ {target.mention} timed out permanent", ephemeral=True)
+                else:
+                    await target.timeout(duration, reason=reden)
+                    await interaction.response.send_message(f"✅ {target.mention} timed out voor {duur_str}", ephemeral=True)
+                if log_channel:
+                    await log_channel.send(f"⏱ {target.mention} timed out door {interaction.user.mention}\nReden: {reden}\nDuur: {duur_str or 'permanent'}")
+            else:
+                await interaction.response.send_message("❌ Ongeldige actie. Gebruik ban/kick/warn/timeout", ephemeral=True)
+
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Actie mislukt: {e}", ephemeral=True)
 
 
-# ---- Command ----
-@bot.tree.command(name="moderatie", description="Open moderatie menu")
-@app_commands.describe(member="Kies een gebruiker", reason="Geef een reden")
-async def moderatie(interaction: discord.Interaction, member: discord.Member, reason: str):
-    if not any(r.id in MOD_ROLES for r in interaction.user.roles):
-        await interaction.response.send_message("❌ Je hebt geen toegang.", ephemeral=True)
+@bot.tree.command(
+    name="moderatie",
+    description="Open het moderatie menu",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def moderatie(interaction: discord.Interaction):
+    allowed = any(r.id in MOD_ROLES for r in interaction.user.roles)
+    if not allowed:
+        await interaction.response.send_message("❌ Je hebt geen toegang tot dit menu.", ephemeral=True)
         return
-
-    view = ModerationMenu(member, reason)
-    await interaction.response.send_message(
-        f"⚡ Moderatie menu voor **{member}**\n**Reden:** {reason}", 
-        view=view,
-        ephemeral=True
-    )
+    modal = ModeratieModal()
+    await interaction.response.send_modal(modal)
 # ------------------- Start Bot -------------------
 keep_alive()
 
