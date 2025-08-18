@@ -403,6 +403,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
             except Exception as e:
                 print(f"Kon rol niet verwijderen: {e}")
 
+# ------------------- Moderatie Modal -------------------
 class ModeratieModal(discord.ui.Modal, title="Moderatie Menu"):
     gebruiker = discord.ui.TextInput(
         label="Gebruiker ID",
@@ -432,22 +433,19 @@ class ModeratieModal(discord.ui.Modal, title="Moderatie Menu"):
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
         if not guild:
-            await interaction.response.send_message(
-                "❌ Guild niet gevonden.", ephemeral=True)
+            await interaction.response.send_message("❌ Guild niet gevonden.", ephemeral=True)
             return
 
         try:
             target = await guild.fetch_member(int(self.gebruiker.value))
         except:
-            await interaction.response.send_message(
-                "❌ Gebruiker niet gevonden.", ephemeral=True)
+            await interaction.response.send_message("❌ Gebruiker niet gevonden.", ephemeral=True)
             return
 
         actie = self.actie.value.lower()
         reden = self.reden.value
         duur_val = self.duur.value
 
-        # Ban
         if actie == "ban":
             await target.ban(reason=reden)
             kanaal = guild.get_channel(1405586824847556769)
@@ -455,7 +453,6 @@ class ModeratieModal(discord.ui.Modal, title="Moderatie Menu"):
                 await kanaal.send(f"✅ {target.mention} is gebanned | Reden: {reden}")
             await interaction.response.send_message("Gebruiker gebanned ✅", ephemeral=True)
 
-        # Kick
         elif actie == "kick":
             await target.kick(reason=reden)
             kanaal = guild.get_channel(1405586854442569749)
@@ -463,18 +460,15 @@ class ModeratieModal(discord.ui.Modal, title="Moderatie Menu"):
                 await kanaal.send(f"✅ {target.mention} is gekickt | Reden: {reden}")
             await interaction.response.send_message("Gebruiker gekickt ✅", ephemeral=True)
 
-        # Warn
         elif actie == "warn":
             kanaal = guild.get_channel(1406995238404231299)
             if kanaal:
                 await kanaal.send(f"⚠️ {target.mention} is gewaarschuwd | Reden: {reden}")
             await interaction.response.send_message("Gebruiker gewaarschuwd ✅", ephemeral=True)
 
-        # Timeout
         elif actie == "timeout":
             if not duur_val.isdigit():
-                await interaction.response.send_message(
-                    "❌ Geef een geldige duur in minuten op voor timeout.", ephemeral=True)
+                await interaction.response.send_message("❌ Geef een geldige duur in minuten op voor timeout.", ephemeral=True)
                 return
             duur_sec = int(duur_val) * 60
             await target.edit(timeout=discord.utils.utcnow() + timedelta(seconds=duur_sec), reason=reden)
@@ -485,6 +479,25 @@ class ModeratieModal(discord.ui.Modal, title="Moderatie Menu"):
 
         else:
             await interaction.response.send_message("❌ Ongeldige actie!", ephemeral=True)
+
+
+# ------------------- Slash Command -------------------
+@bot.tree.command(
+    name="moderatie",
+    description="Open het moderatie UI menu",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def moderatie(interaction: discord.Interaction):
+    allowed_roles = {
+        1402418357596061756, 1402418713612910663, 1403013958562218054,
+        1342974632524775528, 1405597740494356631, 1402419665808134395
+    }
+    if not any(r.id in allowed_roles for r in interaction.user.roles):
+        await interaction.response.send_message("❌ Je hebt geen toegang tot dit commando.", ephemeral=True)
+        return
+
+    modal = ModeratieModal()
+    await interaction.response.send_modal(modal)
 
 # ------------------- Start Bot -------------------
 keep_alive()
