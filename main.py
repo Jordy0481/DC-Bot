@@ -416,30 +416,31 @@ LOG_CHANNELS = {
     "timeout": 1405586885384081448
 }
 
-class ModeratieModal(discord.ui.Modal, title="Moderatie Menu"):
-    member = discord.ui.TextInput(label="Gebruiker ID of mention",
-                                  style=discord.TextStyle.short,
-                                  placeholder="Bijv. @Speler of ID",
-                                  required=True,
-                                  max_length=100)
-    
-    actie = discord.ui.TextInput(label="Actie (ban/kick/warn/timeout)",
-                                 style=discord.TextStyle.short,
-                                 placeholder="ban / kick / warn / timeout",
-                                 required=True,
-                                 max_length=20)
-    
-    reden = discord.ui.TextInput(label="Reden",
-                                 style=discord.TextStyle.paragraph,
-                                 placeholder="Waarom deze actie?",
-                                 required=True,
-                                 max_length=1000)
-    
-    duur = discord.ui.TextInput(label="Timeout duur (bijv. 10m, 2h)",
-                                style=discord.TextStyle.short,
-                                placeholder="Laat leeg als niet van toepassing",
-                                required=False,
-                                max_length=20)
+# ------------------- Modal -------------------
+class ModeratieModal(discord.ui.Modal):
+    def __init__(self, target: discord.Member, actie: str):
+        super().__init__(title=f"Moderatie: {actie.capitalize()}")
+        self.target = target
+        self.actie = actie.lower()
+
+        self.reden = discord.ui.TextInput(
+            label="Reden",
+            style=discord.TextStyle.paragraph,
+            placeholder="Waarom deze actie?",
+            required=True,
+            max_length=1000
+        )
+        self.add_item(self.reden)
+
+        if self.actie == "timeout":
+            self.duur = discord.ui.TextInput(
+                label="Timeout duur (bijv. 10m, 2h)",
+                style=discord.TextStyle.short,
+                placeholder="Bijv. 10m, 2h",
+                required=True,
+                max_length=20
+            )
+            self.add_item(self.duur)
 
     async def on_submit(self, interaction: discord.Interaction):
         if not any(r.id in MOD_ROLES for r in interaction.user.roles):
@@ -448,29 +449,12 @@ class ModeratieModal(discord.ui.Modal, title="Moderatie Menu"):
             )
             return
 
-        guild = interaction.guild
-        if guild is None:
-            await interaction.response.send_message("Kon guild niet vinden.", ephemeral=True)
-            return
-
-        # Member ophalen
-        try:
-            if self.member.value.isdigit():
-                target = guild.get_member(int(self.member.value))
-            else:
-                target = guild.get_member_named(self.member.value.strip("@"))
-            if target is None:
-                target = await guild.fetch_member(int(self.member.value.strip("<@!>")))
-        except:
-            await interaction.response.send_message("Gebruiker niet gevonden.", ephemeral=True)
-            return
-
-        actie = self.actie.value.lower()
+        target = self.target
+        actie = self.actie
         reden = self.reden.value
-        duur = self.duur.value.strip()
-
+        duur = getattr(self, "duur", None)
         log_channel_id = LOG_CHANNELS.get(actie)
-        log_channel = guild.get_channel(log_channel_id) if log_channel_id else None
+        log_channel = interaction.guild.get_channel(log_channel_id) if log_channel_id else None
 
         try:
             if actie == "ban":
@@ -482,25 +466,20 @@ class ModeratieModal(discord.ui.Modal, title="Moderatie Menu"):
             elif actie == "warn":
                 msg = f"⚠️ {target} is gewaarschuwd | Reden: {reden}"
             elif actie == "timeout":
-                if duur:
-                    # tijd naar seconden omzetten
-                    import re
-                    m = re.match(r"(\d+)([smhd])", duur)
-                    if m:
-                        num, unit = m.groups()
-                        num = int(num)
-                        factor = {"s":1, "m":60, "h":3600, "d":86400}[unit]
-                        duration = num * factor
-                        await target.timeout(duration=discord.utils.utcnow() + discord.timedelta(seconds=duration), reason=reden)
-                        msg = f"⏱ {target} is getimeout voor {duur} | Reden: {reden}"
-                    else:
-                        await interaction.response.send_message("Ongeldige duur. Gebruik bv. 10m, 2h", ephemeral=True)
-                        return
-                else:
-                    await interaction.response.send_message("Duur is verplicht voor timeout.", ephemeral=True)
+                # Tijd omzetten
+                import re
+                m = re.match(r"(\d+)([smhd])", duur.value.strip())
+                if not m:
+                    await interaction.response.send_message("Ongeldige duur. Gebruik bv. 10m, 2h", ephemeral=True)
                     return
+                num, unit = m.groups()
+                num = int(num)
+                factor = {"s":1, "m":60, "h":3600, "d":86400}[unit]
+                duration = num * factor
+                await target.timeout(duration=discord.utils.utcnow() + discord.timedelta(seconds=duration), reason=reden)
+                msg = f"⏱ {target} is getimeout voor {duur.value} | Reden: {reden}"
             else:
-                await interaction.response.send_message("Ongeldige actie. Kies ban/kick/warn/timeout", ephemeral=True)
+                await interaction.response.send_message("Ongeldige actie.", ephemeral=True)
                 return
 
             if log_channel:
@@ -509,10 +488,25 @@ class ModeratieModal(discord.ui.Modal, title="Moderatie Menu"):
         except Exception as e:
             await interaction.response.send_message(f"Fout bij uitvoeren: {e}", ephemeral=True)
 
+
+# ------------------- Slash Command -------------------
 @bot.tree.command(name="moderatie",
                   description="Open het moderatie menu",
                   guild=discord.Object(id=GUILD_ID))
-async def moderatie(interaction: discord.Interaction):
+@app_commands.describe(
+    gebruiker="Kies een gebruiker",
+    actie="Kies actie: ban/kick/warn/timeout"
+)
+async def moderatie(interaction: discord.Interaction, gebruiker: discord.Member, actie: str):
+    if not any(r.id in MOD_ROLES for r in interaction.user.roles):
+        await interaction.response.send_message("❌ Je hebt geen toegang tot dit commando.", ephemeral=True)
+        return
+
+    actie = actie.lower()
+    if actie not in ["ban", "kick", "warn", "timeout"]:
+        await interaction.response.send_message("Ongeldige actie. Kies ban/kick/warn/timeout", ephemeral=True)
+        return
+
     modal = ModeratieModal()
     await interaction.response.send_modal(modal)
 # ------------------- Start Bot -------------------
