@@ -1,17 +1,13 @@
 # Boot message
 print("Booting up...")
 
-import discord
-from discord import app_commands 
-from discord.ext import commands
 import os
-from discord import ui
-from discord import app_commands, Interaction, SelectOption, Embed
-from discord.ui import View, Select, Modal, TextInput
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+import discord
+from discord.ext import commands
+from discord import app_commands
 from discord.ui import View, Button, Modal, TextInput, Select, UserSelect
 from discord import SelectOption
-
 from flask import Flask
 from threading import Thread
 
@@ -30,69 +26,67 @@ def keep_alive():
     t.start()
 
 
-# ------------------- Discord Bot -------------------
-# Vul hier je server-ID in (voor slash commands in 1 server)
+# ------------------- Config -------------------
 GUILD_ID = 1342974632524775526
 
+# Moderation roles allowed for regular moderatie menu
+ALLOWED_ROLES = {
+    1402418357596061756,
+    1402418713612910663,
+    1403013958562218054,
+    1342974632524775528,
+    1405597740494356631,
+    1402419665808134395
+}
+
+# Roles allowed to UNBAN (as you listed; includes the extra id you provided)
+UNBAN_ROLES = {
+    1402418357596061756,
+    1402418713612910663,
+    1403013958562218054,
+    1342974632524775527,
+    1342974632524775528,
+    1405597740494356631,
+    1402419665808134395
+}
+
+# Log channels
+LOG_CHANNELS = {
+    "ban": 1405586824847556769,
+    "kick": 1405586854442569749,
+    "warn": 1406995238404231299,
+    # timeout removed per request
+}
+
+UNBAN_LOG_CHANNEL = 1405587917287587860  # provided unban log channel
+
+
+# ------------------- Bot -------------------
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
 intents.members = True
 
-
 bot = commands.Bot(command_prefix="/", intents=intents)
 bot.role_embed_data = {}  # opslag voor role embeds
 
 
-# Event: bot ready
+# ------------------- Events -------------------
 @bot.event
 async def on_ready():
     print(f"✅ Bot ingelogd als {bot.user}")
     try:
-        # Alleen in 1 server syncen (snelste)
         synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         print(f"🌐 Slash commands gesynchroniseerd: {len(synced)}")
     except Exception as e:
         print(f"❌ Fout bij sync: {e}")
 
 
-# ------------------- Commands -------------------
-@bot.tree.command(
-    name="ping",
-    description="Check de latency van de bot (alleen voor speciale rol)",
-    guild=discord.Object(id=GUILD_ID)
-)
-async def ping(interaction: discord.Interaction):
-    allowed_role = 1402417593419305060  # vereiste rol-ID
-    if allowed_role not in [r.id for r in interaction.user.roles]:
-        await interaction.response.send_message(
-            "❌ Je hebt geen toegang tot dit commando.", ephemeral=True
-        )
-        return
-
-    await interaction.response.send_message(
-        f"Pong! `{bot.latency*1000:.2f}ms`", ephemeral=True
-    )
-
-
 # ------------------- Embed Modal -------------------
-class EmbedModal(discord.ui.Modal, title="Maak een Embed"):
-    titel = discord.ui.TextInput(label="Titel",
-                                 style=discord.TextStyle.short,
-                                 placeholder="Bijv. Mededeling",
-                                 required=True,
-                                 max_length=100)
-    beschrijving = discord.ui.TextInput(
-        label="Beschrijving",
-        style=discord.TextStyle.paragraph,
-        placeholder="Tekst die in de embed verschijnt",
-        required=True,
-        max_length=2000)
-    kleur = discord.ui.TextInput(label="Kleur (hex of none)",
-                                 style=discord.TextStyle.short,
-                                 placeholder="#2ecc71",
-                                 required=False,
-                                 max_length=10)
+class EmbedModal(Modal, title="Maak een Embed"):
+    titel = TextInput(label="Titel", style=discord.TextStyle.short, placeholder="Bijv. Mededeling", required=True, max_length=100)
+    beschrijving = TextInput(label="Beschrijving", style=discord.TextStyle.paragraph, placeholder="Tekst die in de embed verschijnt", required=True, max_length=2000)
+    kleur = TextInput(label="Kleur (hex of none)", style=discord.TextStyle.short, placeholder="#2ecc71", required=False, max_length=10)
 
     async def on_submit(self, interaction: discord.Interaction):
         kleur_input = self.kleur.value or "#2ecc71"
@@ -104,51 +98,32 @@ class EmbedModal(discord.ui.Modal, title="Maak een Embed"):
             except:
                 color = discord.Color.default()
 
-        embed = discord.Embed(title=self.titel.value,
-                              description=self.beschrijving.value,
-                              color=color)
-        embed.set_footer(text=f"Gemaakt door 𝑹𝒐𝒅𝒓𝒊𝒈𝒆𝒖𝒛 𝐂𝐨𝐦𝐦𝐮𝐧𝐢𝐭𝐲")
+        embed = discord.Embed(title=self.titel.value, description=self.beschrijving.value, color=color)
+        embed.set_footer(text=f"Gemaakt door {interaction.user}")
 
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Kon guild niet vinden.",
-                                                    ephemeral=True)
+            await interaction.response.send_message("Kon guild niet vinden.", ephemeral=True)
             return
 
-        options = [
-            discord.SelectOption(label=ch.name, value=str(ch.id))
-            for ch in guild.text_channels[:25]
-        ]
+        options = [SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels[:25]]
 
-        class ChannelSelect(discord.ui.View):
-
+        class ChannelSelect(View):
             @discord.ui.select(placeholder="Kies een kanaal", options=options)
-            async def select_callback(self,
-                                      select_interaction: discord.Interaction,
-                                      select: discord.ui.Select):
+            async def select_callback(self, select_interaction: discord.Interaction, select: Select):
                 kanaal_id = int(select.values[0])
                 kanaal = guild.get_channel(kanaal_id)
                 if kanaal is None:
-                    await select_interaction.response.edit_message(
-                        content="Kanaal niet gevonden.", view=None)
+                    await select_interaction.response.edit_message(content="Kanaal niet gevonden.", view=None)
                     return
                 await kanaal.send(embed=embed)
-                await select_interaction.response.edit_message(
-                    content=f"✅ Embed gestuurd naar {kanaal.mention}",
-                    view=None)
+                await select_interaction.response.edit_message(content=f"✅ Embed gestuurd naar {kanaal.mention}", view=None)
 
-        await interaction.response.send_message(
-            "Kies een kanaal voor je embed:",
-            view=ChannelSelect(),
-            ephemeral=True)
+        await interaction.response.send_message("Kies een kanaal voor je embed:", view=ChannelSelect(), ephemeral=True)
 
 
-@bot.tree.command(
-    name="embed",
-    description="Maak een embed via een formulier",
-    guild=discord.Object(id=GUILD_ID)
-)
-async def embed(interaction: discord.Interaction):
+@bot.tree.command(name="embed", description="Maak een embed via formulier", guild=discord.Object(id=GUILD_ID))
+async def embed_cmd(interaction: discord.Interaction):
     allowed_roles = {
         1402418713612910663,
         1403013958562218054,
@@ -156,53 +131,21 @@ async def embed(interaction: discord.Interaction):
         1405597740494356631,
         1402419665808134395
     }
-
     if not any(r.id in allowed_roles for r in interaction.user.roles):
-        await interaction.response.send_message(
-            "❌ Je hebt geen toegang tot dit commando.", ephemeral=True
-        )
+        await interaction.response.send_message("❌ Je hebt geen toegang tot dit commando.", ephemeral=True)
         return
-
-    modal = EmbedModal()
-    await interaction.response.send_modal(modal)
+    await interaction.response.send_modal(EmbedModal())
 
 
 # ------------------- Role Embed Modal -------------------
-class RoleEmbedModal(discord.ui.Modal, title="Maak een Role Embed"):
-    titel = discord.ui.TextInput(label="Titel",
-                                 style=discord.TextStyle.short,
-                                 placeholder="Bijv. Kies je rol",
-                                 required=True,
-                                 max_length=100)
-    beschrijving = discord.ui.TextInput(
-        label="Beschrijving (embed tekst)",
-        style=discord.TextStyle.paragraph,
-        placeholder="Tekst die in de role-embed verschijnt",
-        required=True,
-        max_length=4000)
-    mapping = discord.ui.TextInput(
-        label="Mapping (emoji:role_id of emoji:RoleName)",
-        style=discord.TextStyle.short,
-        placeholder="Bijv: ✅:1402417593419305060, 🎮:Gamer",
-        required=True,
-        max_length=200)
-    
-    thumbnail = discord.ui.TextInput(
-        label="Thumbnail (URL, optioneel)",
-        style=discord.TextStyle.short,
-        placeholder="https://example.com/thumb.png of type 'serverlogo'",
-        required=False,
-        max_length=200
-    )
-    kleur = discord.ui.TextInput(label="Kleur (hex of none)",
-                                 style=discord.TextStyle.short,
-                                 placeholder="#2ecc71",
-                                 required=False,
-                                 max_length=10)
-
+class RoleEmbedModal(Modal, title="Maak een Role Embed"):
+    titel = TextInput(label="Titel", style=discord.TextStyle.short, placeholder="Bijv. Kies je rol", required=True, max_length=100)
+    beschrijving = TextInput(label="Beschrijving (embed tekst)", style=discord.TextStyle.paragraph, placeholder="Tekst die in de role-embed verschijnt", required=True, max_length=4000)
+    mapping = TextInput(label="Mapping (emoji:role_id of emoji:RoleName)", style=discord.TextStyle.short, placeholder="Bijv: ✅:1402417593419305060, 🎮:Gamer", required=True, max_length=200)
+    thumbnail = TextInput(label="Thumbnail (URL of 'serverlogo')", style=discord.TextStyle.short, placeholder="https://example.com/thumb.png of 'serverlogo'", required=False, max_length=200)
+    kleur = TextInput(label="Kleur (hex of none)", style=discord.TextStyle.short, placeholder="#2ecc71", required=False, max_length=10)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # kleur instellen
         kleur_input = self.kleur.value or "#2ecc71"
         if kleur_input.lower() == "none":
             color = discord.Color.default()
@@ -212,11 +155,7 @@ class RoleEmbedModal(discord.ui.Modal, title="Maak een Role Embed"):
             except:
                 color = discord.Color.default()
 
-        embed = discord.Embed(
-            title=self.titel.value,
-            description=self.beschrijving.value,
-            color=color
-        )
+        embed = discord.Embed(title=self.titel.value, description=self.beschrijving.value, color=color)
 
         if self.thumbnail.value:
             if self.thumbnail.value.lower() == "serverlogo" and interaction.guild.icon:
@@ -227,14 +166,10 @@ class RoleEmbedModal(discord.ui.Modal, title="Maak een Role Embed"):
             embed.set_thumbnail(url=interaction.guild.icon.url)
 
         if interaction.guild.icon:
-            embed.set_footer(
-                text=f"Gemaakt door {interaction.guild.name}",
-                icon_url=interaction.guild.icon.url
-            )
+            embed.set_footer(text=f"Gemaakt door {interaction.guild.name}", icon_url=interaction.guild.icon.url)
         else:
             embed.set_footer(text=f"Gemaakt door {interaction.guild.name}")
-    
-        # mapping parsen
+
         raw_map = {}
         for part in self.mapping.value.split(","):
             if ":" in part:
@@ -245,38 +180,27 @@ class RoleEmbedModal(discord.ui.Modal, title="Maak een Role Embed"):
                     raw_map[emoji_text] = role_part
 
         if not raw_map:
-            await interaction.response.send_message(
-                "Geen geldige mapping gevonden. Gebruik format emoji:role_id of emoji:RoleName",
-                ephemeral=True)
+            await interaction.response.send_message("Geen geldige mapping gevonden. Gebruik format emoji:role_id of emoji:RoleName", ephemeral=True)
             return
 
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Kon guild niet vinden.",
-                                                    ephemeral=True)
+            await interaction.response.send_message("Kon guild niet vinden.", ephemeral=True)
             return
 
-        options = [
-            discord.SelectOption(label=ch.name, value=str(ch.id))
-            for ch in guild.text_channels[:25]
-        ]
+        options = [SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels[:25]]
 
-        class ChannelSelect(discord.ui.View):
-
+        class ChannelSelect(View):
             @discord.ui.select(placeholder="Kies een kanaal", options=options)
-            async def select_callback(self,
-                                      select_interaction: discord.Interaction,
-                                      select: discord.ui.Select):
+            async def select_callback(self, select_interaction: discord.Interaction, select: Select):
                 kanaal_id = int(select.values[0])
                 kanaal = guild.get_channel(kanaal_id)
                 if kanaal is None:
-                    await select_interaction.response.edit_message(
-                        content="Kanaal niet gevonden.", view=None)
+                    await select_interaction.response.edit_message(content="Kanaal niet gevonden.", view=None)
                     return
 
                 message = await kanaal.send(embed=embed)
 
-                # raw_map normaliseren
                 normalized_map = {}
                 for emoji_text, role_part in raw_map.items():
                     role_id = None
@@ -313,20 +237,12 @@ class RoleEmbedModal(discord.ui.Modal, title="Maak een Role Embed"):
                 bot.role_embed_data = getattr(bot, "role_embed_data", {})
                 bot.role_embed_data[message.id] = normalized_map
 
-                await select_interaction.response.edit_message(
-                    content=f"✅ Role embed gestuurd naar {kanaal.mention}\nOpgeslagen mappings: {len(normalized_map)}",
-                    view=None)
+                await select_interaction.response.edit_message(content=f"✅ Role embed gestuurd naar {kanaal.mention}\nOpgeslagen mappings: {len(normalized_map)}", view=None)
 
-        await interaction.response.send_message(
-            "Kies een kanaal voor je role embed:",
-            view=ChannelSelect(),
-            ephemeral=True)
+        await interaction.response.send_message("Kies een kanaal voor je role embed:", view=ChannelSelect(), ephemeral=True)
 
 
-@bot.tree.command(
-    name="roleembed",
-    description="Maak een role embed (alleen bepaalde rollen mogen dit)",
-    guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="roleembed", description="Maak een role embed (alleen bepaalde rollen mogen dit)", guild=discord.Object(id=GUILD_ID))
 async def roleembed(interaction: discord.Interaction):
     allowed_roles = {
         1402418713612910663,
@@ -335,15 +251,10 @@ async def roleembed(interaction: discord.Interaction):
         1405597740494356631,
         1402419665808134395
     }
-
     if not any(r.id in allowed_roles for r in interaction.user.roles):
-        await interaction.response.send_message(
-            "❌ Je hebt geen toegang tot dit commando.", ephemeral=True
-        )
+        await interaction.response.send_message("❌ Je hebt geen toegang tot dit commando.", ephemeral=True)
         return
-
-    modal = RoleEmbedModal()
-    await interaction.response.send_modal(modal)
+    await interaction.response.send_modal(RoleEmbedModal())
 
 
 # ------------------- Reactions → Roles -------------------
@@ -352,11 +263,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     emoji_map = getattr(bot, "role_embed_data", {}).get(payload.message_id)
     if not emoji_map:
         return
-
     guild = bot.get_guild(payload.guild_id)
     if guild is None:
         return
-
     member = guild.get_member(payload.user_id)
     if member is None:
         try:
@@ -365,7 +274,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             return
     if member.bot:
         return
-
     key = str(payload.emoji)
     role_id = emoji_map.get(key)
     if role_id:
@@ -382,11 +290,9 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     emoji_map = getattr(bot, "role_embed_data", {}).get(payload.message_id)
     if not emoji_map:
         return
-
     guild = bot.get_guild(payload.guild_id)
     if guild is None:
         return
-
     member = guild.get_member(payload.user_id)
     if member is None:
         try:
@@ -395,7 +301,6 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
             return
     if member.bot:
         return
-
     key = str(payload.emoji)
     role_id = emoji_map.get(key)
     if role_id:
@@ -407,28 +312,9 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
                 print(f"Kon rol niet verwijderen: {e}")
 
 
-# Moderation roles allowed
-ALLOWED_ROLES = {
-    1402418357596061756,
-    1402418713612910663,
-    1403013958562218054,
-    1342974632524775528,
-    1405597740494356631,
-    1402419665808134395
-}
-
-# Log channels
-LOG_CHANNELS = {
-    "ban": 1405586824847556769,
-    "kick": 1405586854442569749,
-    "warn": 1406995238404231299,
-    "timeout": 1405586885384081448
-}
- #------------------- Moderatie UI (fixed & robust) -------------------
-class ModeratieModal(Modal, title="Reden en opties"):
+#------------------- Moderatie UI (timeout removed) -------------------
+class ModeratieModal(Modal, title="Reden"):
     reden = TextInput(label="Reden", style=discord.TextStyle.paragraph, placeholder="Geef een reden", required=True)
-    duur = TextInput(label="Timeout in seconden (alleen bij timeout)", style=discord.TextStyle.short,
-                     placeholder="Laat leeg indien niet van toepassing", required=False)
 
     def __init__(self, view_ref):
         super().__init__()
@@ -437,10 +323,6 @@ class ModeratieModal(Modal, title="Reden en opties"):
     async def on_submit(self, interaction: discord.Interaction):
         view = self.view_ref
         view.reden = self.reden.value
-        if view.actie == "timeout" and self.duur.value.isdigit():
-            view.duur_sec = int(self.duur.value)
-        else:
-            view.duur_sec = None
 
         member: discord.Member = view.target_member
         actie = view.actie
@@ -452,30 +334,15 @@ class ModeratieModal(Modal, title="Reden en opties"):
             elif actie == "kick":
                 await member.kick(reason=reden)
             elif actie == "warn":
-                # add warn-handling here if you want persistent warns
+                # simple warn: log only (persistent warns can be added later)
                 pass
-            eelif actie == "timeout":
-                if view.duur_sec is None:
-                    await interaction.response.send_message("❌ Geef een geldige duur voor timeout.", ephemeral=True)
-                    return
+            else:
+                await interaction.response.send_message("❌ Ongeldige actie.", ephemeral=True)
+                return
 
-                until_time = datetime.now(timezone.utc) + timedelta(seconds=view.duur_sec)
-
-                # robust: some discord.py builds accept positioneel argument, others expect edit(...)
-                try:
-                    # positioneel until arg (works on some builds)
-                    await member.timeout(until_time, reason=reden)
-                except TypeError:
-                    # fallback: timed_out_until via edit
-                    try:
-                        await member.edit(timed_out_until=until_time, reason=reden)
-                    except Exception as e:
-                        await interaction.response.send_message(f"❌ Timeout kon niet worden gezet: {e}", ephemeral=True)
-                        return
-                        
-            # Logging
+            # Logging to mapping channels
             log_channel_id = LOG_CHANNELS.get(actie)
-            if log_channel_id:
+            if log_channel_id and interaction.guild:
                 log_channel = interaction.guild.get_channel(log_channel_id)
                 if log_channel:
                     embed = discord.Embed(
@@ -483,13 +350,12 @@ class ModeratieModal(Modal, title="Reden en opties"):
                         description=f"**Gebruiker:** {member.mention}\n**Reden:** {reden}\n**Door:** {interaction.user.mention}",
                         color=discord.Color.red()
                     )
-                    if actie == "timeout":
-                        embed.add_field(name="Duur (s)", value=str(view.duur_sec))
                     await log_channel.send(embed=embed)
 
             await interaction.response.send_message(f"✅ Actie {actie} uitgevoerd op {member.mention}", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Fout bij uitvoeren: {e}", ephemeral=True)
+
 
 class ModeratieView(View):
     def __init__(self, author: discord.Member):
@@ -498,26 +364,23 @@ class ModeratieView(View):
         self.target_member: discord.Member = None
         self.actie: str = None
         self.reden: str = None
-        self.duur_sec: int = None
 
-        # Add a UserSelect item programmatically (safer across versions)
-        user_select = UserSelect(placeholder="Kies een gebruiker", min_values=1, max_values=1)
+        # programmatic UserSelect (compatible cross-version)
+        user_select = discord.ui.UserSelect(placeholder="Kies een gebruiker", min_values=1, max_values=1)
         user_select.callback = self._user_selected
         self.add_item(user_select)
 
-        # Buttons (add programmatically so we don't depend on decorator behavior)
+        # Buttons: Ban / Kick / Warn (timeout removed)
         for label, style, attr in [
             ("Ban", discord.ButtonStyle.danger, "ban"),
             ("Kick", discord.ButtonStyle.primary, "kick"),
-            ("Warn", discord.ButtonStyle.secondary, "warn"),
-            ("Timeout", discord.ButtonStyle.success, "timeout")
+            ("Warn", discord.ButtonStyle.secondary, "warn")
         ]:
             btn = Button(label=label, style=style)
             btn.callback = self.make_callback(attr)
             self.add_item(btn)
 
     async def _user_selected(self, interaction: discord.Interaction):
-        # interaction.data['values'] should hold the selected user id(s)
         try:
             sel_vals = interaction.data.get("values", [])
             if sel_vals:
@@ -547,6 +410,7 @@ class ModeratieView(View):
             await interaction.response.send_modal(ModeratieModal(self))
         return callback
 
+
 # ------------------- Moderatie command -------------------
 @bot.tree.command(name="moderatie", description="Open het moderatie UI menu", guild=discord.Object(id=GUILD_ID))
 async def moderatie(interaction: discord.Interaction):
@@ -556,10 +420,66 @@ async def moderatie(interaction: discord.Interaction):
     await interaction.response.send_message("Moderatie menu:", view=ModeratieView(interaction.user), ephemeral=True)
 
 
+# ------------------- UNBAN command (by ID) -------------------
+@bot.tree.command(name="unban", description="Unban een gebruiker via ID (loggingsysteem)", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(user_id="Discord user ID om te unbannen", reason="Reden (optioneel)")
+async def unban(interaction: discord.Interaction, user_id: str, reason: str = "Geen reden opgegeven"):
+    # permissions
+    if not any(r.id in UNBAN_ROLES for r in interaction.user.roles):
+        await interaction.response.send_message("❌ Je hebt geen toestemming om unbans uit te voeren.", ephemeral=True)
+        return
+
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message("❌ Guild niet gevonden.", ephemeral=True)
+        return
+
+    # parse id
+    try:
+        uid = int(user_id.strip())
+    except:
+        await interaction.response.send_message("❌ Ongeldige user ID.", ephemeral=True)
+        return
+
+    try:
+        bans = await guild.bans()
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Kon bans lijst niet ophalen: {e}", ephemeral=True)
+        return
+
+    target_ban = None
+    for ban_entry in bans:
+        if ban_entry.user.id == uid:
+            target_ban = ban_entry
+            break
+
+    if target_ban is None:
+        await interaction.response.send_message("❌ Deze gebruiker is niet geband (of ID niet gevonden).", ephemeral=True)
+        return
+
+    try:
+        await guild.unban(target_ban.user, reason=reason)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Unban faalde: {e}", ephemeral=True)
+        return
+
+    # Log naar unban-kanaal
+    log_channel = guild.get_channel(UNBAN_LOG_CHANNEL)
+    if log_channel:
+        embed = discord.Embed(
+            title="Unban uitgevoerd",
+            description=f"**Gebruiker:** {target_ban.user} (`{target_ban.user.id}`)\n**Door:** {interaction.user.mention}\n**Reden:** {reason}",
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        await log_channel.send(embed=embed)
+
+    await interaction.response.send_message(f"✅ Unbanned: {target_ban.user} (`{target_ban.user.id}`)", ephemeral=True)
+
+
 # ------------------- Start Bot -------------------
 keep_alive()
-
-TOKEN = os.getenv("DISCORD_TOKEN")  # gebruik "TOKEN" als env variable in Koyeb
+TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     print("❌ Geen Discord TOKEN gevonden in environment variables!")
 else:
