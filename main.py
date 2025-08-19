@@ -288,8 +288,9 @@ async def roleembed(interaction: discord.Interaction):
 
     await interaction.response.send_modal(RoleEmbedModal())
 
-# ---------- REACTION → ROLES ----------
-async def handle_reaction(payload: discord.RawReactionActionEvent, add=True):
+# ------------------- Reactions → Roles -------------------
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     emoji_map = getattr(bot, "role_embed_data", {}).get(payload.message_id)
     if not emoji_map:
         return
@@ -298,35 +299,54 @@ async def handle_reaction(payload: discord.RawReactionActionEvent, add=True):
     if guild is None:
         return
 
-    member = guild.get_member(payload.user_id)
-    if member is None:
-        try:
-            member = await guild.fetch_member(payload.user_id)
-        except:
-            return
-
+    member = guild.get_member(payload.user_id) or await guild.fetch_member(payload.user_id)
     if member.bot:
         return
 
-    role_id = emoji_map.get(str(payload.emoji))
+    # Emoji key matchen
+    if payload.emoji.id:  # custom emoji
+        key = f"<{'a' if payload.emoji.animated else ''}:{payload.emoji.name}:{payload.emoji.id}>"
+    else:
+        key = payload.emoji.name  # unicode emoji
+
+    role_id = emoji_map.get(key)
     if role_id:
         role = guild.get_role(role_id)
         if role:
             try:
-                if add:
-                    await member.add_roles(role)
-                else:
-                    await member.remove_roles(role)
+                await member.add_roles(role)
             except Exception as e:
-                print(f"Kon rol niet {'toevoegen' if add else 'verwijderen'}: {e}")
+                print(f"Kon rol niet toevoegen: {e}")
 
-@bot.event
-async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    await handle_reaction(payload, add=True)
 
 @bot.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
-    await handle_reaction(payload, add=False)
+    emoji_map = getattr(bot, "role_embed_data", {}).get(payload.message_id)
+    if not emoji_map:
+        return
+
+    guild = bot.get_guild(payload.guild_id)
+    if guild is None:
+        return
+
+    member = guild.get_member(payload.user_id) or await guild.fetch_member(payload.user_id)
+    if member.bot:
+        return
+
+    # Emoji key matchen
+    if payload.emoji.id:  # custom emoji
+        key = f"<{'a' if payload.emoji.animated else ''}:{payload.emoji.name}:{payload.emoji.id}>"
+    else:
+        key = payload.emoji.name  # unicode emoji
+
+    role_id = emoji_map.get(key)
+    if role_id:
+        role = guild.get_role(role_id)
+        if role:
+            try:
+                await member.remove_roles(role)
+            except Exception as e:
+                print(f"Kon rol niet verwijderen: {e}")
 
 # ------------------- Helpers -------------------
 async def try_send_dm(user: discord.abc.Messageable, content: str):
