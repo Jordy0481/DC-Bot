@@ -514,6 +514,51 @@ async def moderatie(interaction: discord.Interaction):
     await interaction.response.send_message("Moderatie menu:", view=ModeratieView(interaction.user), ephemeral=True)
 
 
+# Debug commands: checkban + listbans
+@bot.tree.command(name="checkban", description="Check of een user ID geband is in deze server", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(user_id="Discord user ID (alleen cijfers)")
+async def checkban(interaction: discord.Interaction, user_id: str):
+    try:
+        uid = int(user_id.strip())
+    except:
+        await interaction.response.send_message("❌ Ongeldige ID — gebruik alleen cijfers.", ephemeral=True)
+        return
+
+    try:
+        bans = await interaction.guild.bans()
+    except TypeError:
+        bans = [b async for b in interaction.guild.bans()]
+
+    ban_entry = next((b for b in bans if b.user.id == uid), None)
+    if ban_entry:
+        reason = ban_entry.reason or "Geen reden opgegeven"
+        emb = discord.Embed(title="User is geband", description=f"**Gebruiker:** {ban_entry.user} (`{ban_entry.user.id}`)\n**Reden:** {reason}", color=discord.Color.red())
+        await interaction.response.send_message(embed=emb, ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Deze user ID is niet geband in deze server.", ephemeral=True)
+
+@bot.tree.command(name="listbans", description="Laat de laatste N bans zien (debug)", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(limit="Hoeveel bans tonen (max 25)")
+async def listbans(interaction: discord.Interaction, limit: int = 10):
+    if limit < 1 or limit > 25:
+        await interaction.response.send_message("❌ Limit tussen 1 en 25.", ephemeral=True)
+        return
+    try:
+        bans = await interaction.guild.bans()
+    except TypeError:
+        bans = [b async for b in interaction.guild.bans()]
+
+    if not bans:
+        await interaction.response.send_message("🔎 Geen bans gevonden in deze server.", ephemeral=True)
+        return
+
+    lines = []
+    for i, b in enumerate(bans[:limit], start=1):
+        reason = b.reason or "Geen reden"
+        lines.append(f"{i}. {b.user} — `{b.user.id}` — {reason}")
+
+    emb = discord.Embed(title=f"Laatst {min(limit,len(bans))} bans", description="\n".join(lines), color=discord.Color.orange())
+    await interaction.response.send_message(embed=emb, ephemeral=True)
 
 
 
