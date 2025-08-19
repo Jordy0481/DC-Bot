@@ -132,6 +132,7 @@ async def embed_cmd(interaction: discord.Interaction):
         return
     await interaction.response.send_modal(EmbedModal())
 
+# ------------------ ROLE EMBED COMMAND ------------------
 
 @bot.tree.command(name="roleembed", description="Maak een role-embed met emojis (custom werkt ook!)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
