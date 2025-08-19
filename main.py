@@ -308,6 +308,24 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
                 print(f"Kon rol niet verwijderen: {e}")
 
 
+# ------------------- Helpers -------------------
+async def try_send_dm(user: discord.abc.Messageable, content: str):
+    """Probeer een DM te sturen, maar faal stilletjes zonder te crashen."""
+    try:
+        await user.send(content)
+        return True
+    except Exception:
+        return False
+
+def make_action_dm(guild_name: str, actie: str, reden: str, moderator: str):
+    """Return DM text voor acties."""
+    return (
+        f"Je bent **{actie}** in **{guild_name}**.\n"
+        f"Reden: {reden}\n"
+        f"Door: {moderator}\n"
+        f"Tijd: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    )
+
 # ------------------- Moderatie modal (reden) -------------------
 class ModeratieModal(Modal, title="Reden"):
     reden = TextInput(label="Reden", style=discord.TextStyle.paragraph, placeholder="Geef een reden", required=True)
@@ -320,6 +338,7 @@ class ModeratieModal(Modal, title="Reden"):
         view = self.view_ref
         action = view.actie
         guild = interaction.guild
+        moderator = interaction.user
 
         try:
             if action in {"ban", "kick", "warn"}:
@@ -343,23 +362,33 @@ class ModeratieModal(Modal, title="Reden"):
                     await interaction.response.send_message("❌ Kan deze gebruiker niet modereren: hogere of gelijke rol dan de bot.", ephemeral=True)
                     return
 
-                # execute
+                # Probeer DM te sturen vóór de actie (zodat ze het bericht ontvangen)
+                dm_text = make_action_dm(guild.name if guild else "de server", action.upper(), self.reden.value, moderator.mention)
+                dm_ok = await try_send_dm(member, dm_text)
+
+                # Execute action
                 if action == "ban":
-                    await member.ban(reason=view.reden)
+                    await member.ban(reason=self.reden.value)
                 elif action == "kick":
-                    await member.kick(reason=view.reden)
+                    await member.kick(reason=self.reden.value)
                 elif action == "warn":
                     # Placeholder: extend with persistent warn store if desired
+                    # still send DM (done above)
                     pass
 
-                # Logging
+                # Logging to channel
                 log_id = LOG_CHANNELS.get(action)
                 if log_id:
                     log_chan = guild.get_channel(log_id)
                     if log_chan:
                         emb = discord.Embed(
                             title=f"{action.capitalize()} uitgevoerd",
-                            description=f"**Gebruiker:** {member} (`{member.id}`)\n**Reden:** {view.reden}\n**Door:** {interaction.user.mention}",
+                            description=(
+                                f"**Gebruiker:** {member} (`{member.id}`)\n"
+                                f"**Reden:** {self.reden.value}\n"
+                                f"**Door:** {moderator.mention}\n"
+                                f"**DM verzonden:** {'Ja' if dm_ok else 'Nee'}"
+                            ),
                             color=discord.Color.red(),
                             timestamp=datetime.now(timezone.utc),
                         )
@@ -385,6 +414,7 @@ class UnbanModal(Modal, title="Unban gebruiker (ID)"):
 
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
+        moderator = interaction.user
         if guild is None:
             await interaction.response.send_message("❌ Guild niet gevonden.", ephemeral=True)
             return
@@ -424,6 +454,10 @@ class UnbanModal(Modal, title="Unban gebruiker (ID)"):
             await interaction.response.send_message(f"❌ Unban faalde: {e}", ephemeral=True)
             return
 
+        # Probeer DM naar gebruiker ná unban
+        dm_text = make_action_dm(guild.name, "UNBAN", reason_text, moderator.mention)
+        try_send = await try_send_dm(ban_entry.user, dm_text)
+
         # log to unban channel
         log_id = LOG_CHANNELS.get("unban")
         if log_id:
@@ -431,7 +465,12 @@ class UnbanModal(Modal, title="Unban gebruiker (ID)"):
             if log_channel:
                 emb = discord.Embed(
                     title="Unban uitgevoerd",
-                    description=f"**Gebruiker:** {ban_entry.user} (`{ban_entry.user.id}`)\n**Reden:** {reason_text}\n**Door:** {interaction.user.mention}",
+                    description=(
+                        f"**Gebruiker:** {ban_entry.user} (`{ban_entry.user.id}`)\n"
+                        f"**Reden:** {reason_text}\n"
+                        f"**Door:** {moderator.mention}\n"
+                        f"**DM verzonden:** {'Ja' if try_send else 'Nee'}"
+                    ),
                     color=discord.Color.green(),
                     timestamp=datetime.now(timezone.utc),
                 )
@@ -514,51 +553,6 @@ async def moderatie(interaction: discord.Interaction):
     await interaction.response.send_message("Moderatie menu:", view=ModeratieView(interaction.user), ephemeral=True)
 
 
-# Debug commands: checkban + listbans
-@bot.tree.command(name="checkban", description="Check of een user ID geband is in deze server", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(user_id="Discord user ID (alleen cijfers)")
-async def checkban(interaction: discord.Interaction, user_id: str):
-    try:
-        uid = int(user_id.strip())
-    except:
-        await interaction.response.send_message("❌ Ongeldige ID — gebruik alleen cijfers.", ephemeral=True)
-        return
-
-    try:
-        bans = await interaction.guild.bans()
-    except TypeError:
-        bans = [b async for b in interaction.guild.bans()]
-
-    ban_entry = next((b for b in bans if b.user.id == uid), None)
-    if ban_entry:
-        reason = ban_entry.reason or "Geen reden opgegeven"
-        emb = discord.Embed(title="User is geband", description=f"**Gebruiker:** {ban_entry.user} (`{ban_entry.user.id}`)\n**Reden:** {reason}", color=discord.Color.red())
-        await interaction.response.send_message(embed=emb, ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ Deze user ID is niet geband in deze server.", ephemeral=True)
-
-@bot.tree.command(name="listbans", description="Laat de laatste N bans zien (debug)", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(limit="Hoeveel bans tonen (max 25)")
-async def listbans(interaction: discord.Interaction, limit: int = 10):
-    if limit < 1 or limit > 25:
-        await interaction.response.send_message("❌ Limit tussen 1 en 25.", ephemeral=True)
-        return
-    try:
-        bans = await interaction.guild.bans()
-    except TypeError:
-        bans = [b async for b in interaction.guild.bans()]
-
-    if not bans:
-        await interaction.response.send_message("🔎 Geen bans gevonden in deze server.", ephemeral=True)
-        return
-
-    lines = []
-    for i, b in enumerate(bans[:limit], start=1):
-        reason = b.reason or "Geen reden"
-        lines.append(f"{i}. {b.user} — `{b.user.id}` — {reason}")
-
-    emb = discord.Embed(title=f"Laatst {min(limit,len(bans))} bans", description="\n".join(lines), color=discord.Color.orange())
-    await interaction.response.send_message(embed=emb, ephemeral=True)
 
 
 
