@@ -133,180 +133,81 @@ async def embed_cmd(interaction: discord.Interaction):
     await interaction.response.send_modal(EmbedModal())
 
 
-# ------------------- Role Embed Modal -------------------
-class RoleEmbedModal(Modal, title="Maak een Role Embed"):
-    titel = TextInput(label="Titel", style=discord.TextStyle.short, placeholder="Bijv. Kies je rol", required=True, max_length=100)
-    beschrijving = TextInput(label="Beschrijving (embed tekst)", style=discord.TextStyle.paragraph, placeholder="Tekst die in de role-embed verschijnt", required=True, max_length=4000)
-    mapping = TextInput(label="Mapping (emoji:role_id of emoji:RoleName)", style=discord.TextStyle.short, placeholder="Bijv: ✅:1402417593419305060, 🎮:Gamer", required=True, max_length=200)
-    thumbnail = TextInput(label="Thumbnail (URL of 'serverlogo')", style=discord.TextStyle.short, placeholder="https://example.com/thumb.png of 'serverlogo'", required=False, max_length=200)
-    kleur = TextInput(label="Kleur (hex of none)", style=discord.TextStyle.short, placeholder="#2ecc71", required=False, max_length=10)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        kleur_input = self.kleur.value or "#2ecc71"
-        if kleur_input.lower() == "none":
-            color = discord.Color.default()
-        else:
-            try:
-                color = discord.Color(int(kleur_input.strip("#"), 16))
-            except:
-                color = discord.Color.default()
-
-        embed = discord.Embed(title=self.titel.value, description=self.beschrijving.value, color=color)
-
-        if self.thumbnail.value:
-            if self.thumbnail.value.lower() == "serverlogo" and interaction.guild.icon:
-                embed.set_thumbnail(url=interaction.guild.icon.url)
-            else:
-                embed.set_thumbnail(url=self.thumbnail.value)
-        elif interaction.guild.icon:
-            embed.set_thumbnail(url=interaction.guild.icon.url)
-
-        if interaction.guild.icon:
-            embed.set_footer(text=f"Gemaakt door {interaction.guild.name}", icon_url=interaction.guild.icon.url)
-        else:
-            embed.set_footer(text=f"Gemaakt door {interaction.guild.name}")
-
-        raw_map = {}
-        for part in self.mapping.value.split(","):
-            if ":" in part:
-                left, right = part.split(":", 1)
-                emoji_text = left.strip()
-                role_part = right.strip()
-                if emoji_text and role_part:
-                    raw_map[emoji_text] = role_part
-
-        if not raw_map:
-            await interaction.response.send_message("Geen geldige mapping gevonden. Gebruik format emoji:role_id of emoji:RoleName", ephemeral=True)
-            return
-
-        guild = interaction.guild
-        if guild is None:
-            await interaction.response.send_message("Kon guild niet vinden.", ephemeral=True)
-            return
-
-        options = [SelectOption(label=ch.name, value=str(ch.id)) for ch in guild.text_channels[:25]]
-
-        class ChannelSelect(View):
-            @discord.ui.select(placeholder="Kies een kanaal", options=options)
-            async def select_callback(self, select_interaction: discord.Interaction, select: Select):
-                kanaal_id = int(select.values[0])
-                kanaal = guild.get_channel(kanaal_id)
-                if kanaal is None:
-                    await select_interaction.response.edit_message(content="Kanaal niet gevonden.", view=None)
-                    return
-
-                message = await kanaal.send(embed=embed)
-
-                normalized_map = {}
-                for emoji_text, role_part in raw_map.items():
-                    role_id = None
-                    if role_part.isdigit():
-                        try:
-                            role_id = int(role_part)
-                            role_obj = guild.get_role(role_id)
-                            if role_obj is None:
-                                try:
-                                    role_obj = await guild.fetch_role(role_id)
-                                except:
-                                    role_obj = None
-                            if role_obj is None:
-                                print(f"Rol-id niet gevonden in guild: {role_id}")
-                                role_id = None
-                        except:
-                            role_id = None
-                    else:
-                        role_obj = discord.utils.get(guild.roles, name=role_part)
-                        if role_obj:
-                            role_id = role_obj.id
-                        else:
-                            print(f"Rolnaam niet gevonden: {role_part}")
-                            role_id = None
-
-                    try:
-                        await message.add_reaction(emoji_text)
-                        normalized_map[str(emoji_text)] = role_id
-                    except Exception as e:
-                        print(f"Kon emoji niet toevoegen ({emoji_text}): {e}")
-
-                normalized_map = {k: v for k, v in normalized_map.items() if v is not None}
-
-                bot.role_embed_data = getattr(bot, "role_embed_data", {})
-                bot.role_embed_data[message.id] = normalized_map
-
-                await select_interaction.response.edit_message(content=f"✅ Role embed gestuurd naar {kanaal.mention}\nOpgeslagen mappings: {len(normalized_map)}", view=None)
-
-        await interaction.response.send_message("Kies een kanaal voor je role embed:", view=ChannelSelect(), ephemeral=True)
-
-
-@bot.tree.command(name="roleembed", description="Maak een role embed (alleen bepaalde rollen mogen dit)", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="roleembed", description="Maak een role-embed met emojis (custom werkt ook!)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
 async def roleembed(interaction: discord.Interaction):
-    allowed_roles = {
-        1402418713612910663,
-        1403013958562218054,
-        1342974632524775528,
-        1405597740494356631,
-        1402419665808134395
+    # Hier zet je je emoji → role mapping
+    role_mapping = {
+        "✅": "Verified",  
+        "<:fn_battelbus:128293947234234>": "Battle Bus",  
+        "<:pro:128293947999999999>": "Pro Gamer"
     }
-    if not any(r.id in allowed_roles for r in interaction.user.roles):
-        await interaction.response.send_message("❌ Je hebt geen toegang tot dit commando.", ephemeral=True)
-        return
-    await interaction.response.send_modal(RoleEmbedModal())
 
+    embed = discord.Embed(
+        title="🎭 Kies je rollen",
+        description="Klik op een emoji om de bijbehorende rol te krijgen!\n\n" + "\n".join(
+            [f"{emoji} → {role}" for emoji, role in role_mapping.items()]
+        ),
+        color=discord.Color.blurple()
+    )
+    msg = await interaction.channel.send(embed=embed)
 
-# ------------------- Reactions → Roles -------------------
-@bot.event
-async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    emoji_map = getattr(bot, "role_embed_data", {}).get(payload.message_id)
-    if not emoji_map:
-        return
-    guild = bot.get_guild(payload.guild_id)
-    if guild is None:
-        return
-    member = guild.get_member(payload.user_id)
-    if member is None:
+    # Voeg alle emojis toe aan het bericht
+    normalized_map = {}
+    for emoji_text, role_name in role_mapping.items():
         try:
-            member = await guild.fetch_member(payload.user_id)
-        except:
-            return
-    if member.bot:
-        return
-    key = str(payload.emoji)
-    role_id = emoji_map.get(key)
-    if role_id:
-        role = guild.get_role(role_id)
-        if role:
-            try:
-                await member.add_roles(role)
-            except Exception as e:
-                print(f"Kon rol niet toevoegen: {e}")
+            emoji_obj = discord.PartialEmoji.from_str(emoji_text)  # ondersteunt standaard & custom
+            await msg.add_reaction(emoji_obj)
+            normalized_map[str(emoji_obj)] = role_name  # opslaan als string
+        except Exception as e:
+            print(f"⚠️ Kon emoji {emoji_text} niet toevoegen: {e}")
 
+    # Mapping opslaan in message object (kan ook in database)
+    bot.role_message_id = msg.id
+    bot.emoji_role_map = normalized_map
+
+    await interaction.response.send_message("✅ Role-embed geplaatst!", ephemeral=True)
+
+# ------------------ REACTION HANDLERS ------------------
+@bot.event
+async def on_raw_reaction_add(payload):
+    if payload.guild_id != GUILD_ID:
+        return
+    if payload.member is None or payload.member.bot:
+        return
+
+    if payload.message_id != getattr(bot, "role_message_id", None):
+        return
+
+    emoji_str = str(payload.emoji)  # altijd consistent als string
+    role_name = bot.emoji_role_map.get(emoji_str)
+
+    if role_name:
+        guild = bot.get_guild(payload.guild_id)
+        role = discord.utils.get(guild.roles, name=role_name)
+        if role:
+            await payload.member.add_roles(role)
+            print(f"✅ {payload.member} kreeg de rol {role.name}")
 
 @bot.event
-async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
-    emoji_map = getattr(bot, "role_embed_data", {}).get(payload.message_id)
-    if not emoji_map:
+async def on_raw_reaction_remove(payload):
+    if payload.guild_id != GUILD_ID:
         return
-    guild = bot.get_guild(payload.guild_id)
-    if guild is None:
+
+    if payload.message_id != getattr(bot, "role_message_id", None):
         return
-    member = guild.get_member(payload.user_id)
-    if member is None:
-        try:
-            member = await guild.fetch_member(payload.user_id)
-        except:
-            return
-    if member.bot:
-        return
-    key = str(payload.emoji)
-    role_id = emoji_map.get(key)
-    if role_id:
-        role = guild.get_role(role_id)
-        if role:
-            try:
+
+    emoji_str = str(payload.emoji)
+    role_name = bot.emoji_role_map.get(emoji_str)
+
+    if role_name:
+        guild = bot.get_guild(payload.guild_id)
+        member = guild.get_member(payload.user_id)
+        if member:
+            role = discord.utils.get(guild.roles, name=role_name)
+            if role:
                 await member.remove_roles(role)
-            except Exception as e:
-                print(f"Kon rol niet verwijderen: {e}")
-
+                print(f"❌ {member} verloor de rol {role.name}")
 
 # ------------------- Helpers -------------------
 async def try_send_dm(user: discord.abc.Messageable, content: str):
