@@ -632,6 +632,48 @@ async def listbans(interaction: discord.Interaction, limit: int = 10):
     )
     await interaction.response.send_message(embed=emb, ephemeral=True)
 
+# --- CLEAR COMMAND ---
+@bot.tree.command(name="clear", description="Verwijder berichten uit een kanaal", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(amount="Aantal berichten om te verwijderen (of 'all')")
+async def clear(interaction: discord.Interaction, amount: str):
+    ALLOWED_ROLES = {
+        1402418357596061756, 
+        1402418713612910663, 
+        1403013958562218054, 
+        1342974632524775527, 
+        1342974632524775528, 
+        1405597740494356631, 
+        1402419665808134395
+    }
+
+    # Check of de gebruiker een van de rollen heeft
+    if not any(r.id in ALLOWED_ROLES for r in interaction.user.roles):
+        await interaction.response.send_message("❌ Je hebt geen toestemming om dit commando te gebruiken.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    channel = interaction.channel
+    deleted = 0
+
+    try:
+        if amount.lower() == "all":
+            # Verwijder ALLES in dit kanaal
+            await channel.purge(limit=None)
+            await interaction.followup.send("🧹 Alle berichten in dit kanaal zijn verwijderd!", ephemeral=True)
+            return
+        else:
+            num = int(amount)
+            if num < 1 or num > 1000:
+                await interaction.followup.send("❌ Je kan alleen tussen 1 en 1000 berichten verwijderen.", ephemeral=True)
+                return
+
+            deleted_msgs = await channel.purge(limit=num)
+            deleted = len(deleted_msgs)
+            await interaction.followup.send(f"🧹 {deleted} berichten verwijderd.", ephemeral=True)
+
+    except ValueError:
+        await interaction.followup.send("❌ Ongeldig aantal, gebruik een getal of 'all'.", ephemeral=True)
 
 # ------------------- Start Bot -------------------
 keep_alive()
